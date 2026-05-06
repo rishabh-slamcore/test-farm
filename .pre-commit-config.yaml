@@ -1,0 +1,31 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=5000"]
+      - id: check-toml
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+        exclude: |
+          (?x)^(
+            docs/
+          )
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: uv run black --check src test
+        language: system
+        pass_filenames: false
+      - id: isort
+        name: isort
+        entry: uv run isort --check-only src test
+        language: system
+        pass_filenames: false
+      - id: mypy
+        name: mypy
+        entry: uv run mypy src test
+        args: ["--config-file=./pyproject.toml"]
+        language: system
+        pass_filenames: false

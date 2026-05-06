@@ -81,12 +81,12 @@ Follow PEP 8:
 
 ### black
 
-Use `black` as the uncompromising code formatter. Line length is **95 characters**.
+Use `black` as the uncompromising code formatter. Line length is **120 characters**.
 
 ```toml
 [tool.black]
 preview = true
-line-length = 95
+line-length = 120
 target-version = ['py38', 'py39', 'py310', 'py312']
 include = '\.pyi?$'
 ```

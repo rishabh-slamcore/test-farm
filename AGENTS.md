@@ -1,18 +1,36 @@
-# Claude Code Instructions
-
 ## Project Overview
-<!-- Briefly describe what this project does and its core purpose -->
+test-farm is a controlled harness for replaying Slamcore Aware update broadcast scenarios
+under known network conditions.
+
+Its purpose is to let Slamcore engineers validate update delivery reliability under realistic
+warehouse-style network impairment and re-run named failure scenarios on demand from a
+single-host CLI workflow.
 
 ## Architecture
 <!-- Key directories, tech stack, patterns used -->
 
 ## Development Commands
 ```bash
-# Install dependencies
-# Run dev server
+# Create the local virtual environment
+uv venv
+
+# Install project and development dependencies
+uv sync --dev
+
+# Install pre-commit hooks
+uv run pre-commit install
+
+# Run the CLI placeholder / execute a scenario
+uv run test-farm run <scenario.yaml>
+
 # Run tests
-# Build
-# Lint / format
+uv run pytest
+
+# Run local quality checks
+uv run pre-commit run
+
+# Run quality checks across the whole repo
+uv run pre-commit run --all-files
 ```
 
 ## Python Best Practices
