@@ -182,3 +182,63 @@ Supporting multiple YAML scenario definitions makes it straightforward to expres
 | How does Controller address individual containers? | Simple naming scheme — no need to track specific devices |
 | Should Controller itself be a container? | No — a host process is sufficient |
 | Other options explored? | ContainerLab (too complex), ToxiProxy (insufficient effect coverage) |
+
+
+## Router network
+# Router Container — Network Impairment Architecture
+
+## Overview
+
+The test farm uses a **router container** as a dedicated network impairment node
+sitting between the Hawkbit update server and the client containers. All update
+traffic flows through the router container, making it the single point where
+network conditions can be controlled for the entire client fleet.
+
+```
+┌──────────────┐       ┌─────────────────────┐       ┌─────────────────────┐
+│    Server    │       │  Router Container   │       │   Client Containers │
+│              │       │                     │       │                     │
+│  (Hawkbit)   ├─eth0──┤ eth0        eth1 ───┼─eth1──┤ client1             │
+│              │       │       (tc here)     │       │ client2             │
+│              │       │                     │       │ client3  ...        │
+└──────────────┘       └─────────────────────┘       └─────────────────────┘
+  server network         two NICs, one foot            client network
+                         in each network
+```
+
+The router container has two network interfaces: one facing the server network
+and one facing the client network. `tc` rules are applied on the client-facing
+interface (`eth1`) to inject network impairments. Since update traffic is
+predominantly server-to-client (downloads), shaping the egress of `eth1`
+covers the primary use case cleanly.
+
+---
+
+## Why a Router Container
+
+### Alternative: per-client veth impairment
+
+It is possible to apply `tc` directly on the host-side veth interface of each
+client container. This enables per-client independent impairment but introduces
+significant complexity:
+
+- The Controller must track the host-side veth name for every client container
+- Impairment of download traffic (ingress from the client's perspective) requires
+  an IFB (Intermediate Functional Block) device to redirect ingress packets to a
+  virtual egress interface before `tc` can be applied
+- Per-client setup and teardown adds operational overhead
+
+### Why the router container is simpler
+
+By placing a router container in the network path, impairment is applied on
+**egress toward the client network** — a straightforward `tc` operation requiring
+no IFB workarounds. From the kernel's perspective, packets leaving the router
+container's `eth1` are outgoing traffic, and `tc netem` attaches directly.
+
+The tradeoff is that all clients are impaired uniformly. The router container
+approach cannot independently impair individual clients. For the primary goal of
+validating broadcast reliability under general network stress, uniform impairment
+is sufficient.
+
+---
+
