@@ -33,6 +33,8 @@ uv run pre-commit run
 uv run pre-commit run --all-files
 ```
 
+Agent note: in the Codex sandbox, if a `uv` command fails trying to create lock or temporary files under `/home/rishi/.cache/uv`, rerun it as `UV_CACHE_DIR=/tmp/uv-cache uv ...`. This has been verified to fix that cache-path failure mode when invoking `uv` through a shell with extra environment variables. It does not fix unrelated offline dependency-resolution failures.
+
 ## Python Best Practices
 
 All Python code **should try** to follow the standards defined in `docs/specs/best-practices.md`. Key requirements:

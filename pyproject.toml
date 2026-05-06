@@ -9,6 +9,7 @@ description = "Controlled harness for replaying Slamcore Aware update broadcast 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "PyYAML>=6.0.3,<7.0.0",
   "typer>=0.12.3,<1.0",
 ]
 
@@ -41,4 +42,4 @@ packages = ["test_farm"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
-addopts = "-p no:launch_testing"
+addopts = "--disable-plugin-autoload"
