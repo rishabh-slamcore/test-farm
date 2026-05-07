@@ -35,6 +35,8 @@ uv run pre-commit run --all-files
 
 Agent note: in the Codex sandbox, if a `uv` command fails trying to create lock or temporary files under `/home/rishi/.cache/uv`, rerun it as `UV_CACHE_DIR=/tmp/uv-cache uv ...`. This has been verified to fix that cache-path failure mode when invoking `uv` through a shell with extra environment variables. It does not fix unrelated offline dependency-resolution failures.
 
+Agent note: in the Codex sandbox,Do not rely on streamed pytest output. Run pytest with stdout/stderr redirected to /tmp/pytest.out and write the exit code to /tmp/pytest.exit. Then read both files in a separate command. If the exec wrapper does not return, check for pytest/python child processes and inspect the output file. Do not claim tests passed unless /tmp/pytest.exit contains 0.
+
 ## Python Best Practices
 
 All Python code **should try** to follow the standards defined in `docs/specs/best-practices.md`. Key requirements:
