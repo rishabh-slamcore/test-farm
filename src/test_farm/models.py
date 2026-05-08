@@ -12,6 +12,21 @@ class Bundle:
     byte_count: int
     checksum: str
 
+    @classmethod
+    def from_bytes(cls, bundle_id: str, bundle_bytes: bytes) -> "Bundle":
+        """Build bundle metadata from raw bundle bytes.
+
+        :param bundle_id: Stable bundle identifier.
+        :param bundle_bytes: Raw bundle content.
+        :returns: Bundle metadata derived from the bytes.
+        """
+
+        return cls(
+            bundle_id=bundle_id,
+            byte_count=len(bundle_bytes),
+            checksum=hashlib.sha256(bundle_bytes).hexdigest(),
+        )
+
     def to_payload(self) -> dict[str, str | int]:
         """Serialize the bundle for JSON result payloads.
 
@@ -26,8 +41,7 @@ class Bundle:
 
 
 DEFAULT_BUNDLE_BYTES = b"baseline bundle placeholder\n"
-DEFAULT_BUNDLE = Bundle(
+DEFAULT_BUNDLE = Bundle.from_bytes(
     bundle_id="baseline",
-    byte_count=len(DEFAULT_BUNDLE_BYTES),
-    checksum=hashlib.sha256(DEFAULT_BUNDLE_BYTES).hexdigest(),
+    bundle_bytes=DEFAULT_BUNDLE_BYTES,
 )

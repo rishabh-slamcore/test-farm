@@ -14,6 +14,7 @@ def test_run_writes_timed_out_result_file_for_one_client(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     _patch_controller_server(monkeypatch, test_client_success=False)
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
     scenario_file.write_text("client_count: 1\n", encoding="utf-8")
@@ -39,6 +40,7 @@ def test_run_writes_timed_out_result_file_for_one_client(
     assert payload["scenario_file"] == str(scenario_file)
     assert payload["invocation_status"] == "failed"
     assert payload["expected_bundle"] == DEFAULT_BUNDLE.to_payload()
+    assert payload["invocation_error"] is None
     assert payload["clients"] == [
         {
             "client_id": "client-001",
@@ -56,6 +58,7 @@ def test_run_increments_invocation_instance_from_existing_result_files(
     monkeypatch: MonkeyPatch,
 ) -> None:
     _patch_controller_server(monkeypatch, test_client_success=False)
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
     results_dir = tmp_path / "results"
@@ -92,6 +95,7 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
         observed_bind_addresses=observed_bind_addresses,
         observed_expected_bundles=observed_expected_bundles,
     )
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
 
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
@@ -119,6 +123,7 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
     assert result.exit_code == 0
     assert payload["invocation_status"] == "success"
     assert payload["expected_bundle"] == DEFAULT_BUNDLE.to_payload()
+    assert payload["invocation_error"] is None
     assert payload["clients"] == [
         {
             "client_id": "client-001",
@@ -129,12 +134,113 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
     ]
 
 
+def test_run_uses_update_server_manifest_bundle_for_controller_and_result_file(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    manifest_bundle = Bundle(
+        bundle_id="baseline",
+        byte_count=123,
+        checksum="derived-from-update-server",
+    )
+    observed_expected_bundles: list[Bundle] = []
+
+    _patch_controller_server(
+        monkeypatch,
+        test_client_success=True,
+        observed_expected_bundles=observed_expected_bundles,
+    )
+    _patch_update_server(monkeypatch, manifest_bundle=manifest_bundle)
+
+    runner = CliRunner()
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text("client_count: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--controller-reportback-url",
+            "http://controller.example:8080",
+            "--receipt-timeout-seconds",
+            "2",
+        ],
+    )
+
+    result_file = tmp_path / "results" / "result_1.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
+    assert observed_expected_bundles == [manifest_bundle]
+    assert payload["expected_bundle"] == manifest_bundle.to_payload()
+    assert payload["invocation_error"] is None
+    assert payload["clients"] == [
+        {
+            "client_id": "client-001",
+            "client_status": "success",
+            "bundle_id": manifest_bundle.bundle_id,
+            "error_detail": None,
+        }
+    ]
+
+
+def test_run_writes_failed_result_file_when_expected_bundle_fetch_raises_error(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    observed_controller_entries: list[str] = []
+    _patch_controller_server(
+        monkeypatch,
+        test_client_success=True,
+        observed_entries=observed_controller_entries,
+    )
+    _patch_update_server(
+        monkeypatch,
+        manifest_error=RuntimeError("Could not fetch expected bundle manifest."),
+    )
+
+    runner = CliRunner()
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text("client_count: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--controller-reportback-url",
+            "http://controller.example:8080",
+        ],
+    )
+    result_file = tmp_path / "results" / "result_1.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 1
+    assert result_file.exists()
+    assert payload["invocation_status"] == "failed"
+    assert payload["expected_bundle"] is None
+    assert payload["invocation_error"] == {
+        "stage": "manifest_fetch",
+        "detail": "Could not fetch expected bundle manifest.",
+    }
+    assert payload["clients"] == []
+    assert "started_at" in payload
+    assert "finished_at" in payload
+    assert observed_controller_entries == []
+    assert result.output == f"Invocation failed. Result written to {result_file}.\n"
+    assert "Could not fetch expected bundle manifest." not in result.output
+
+
 def _patch_controller_server(
     monkeypatch: MonkeyPatch,
     *,
     test_client_success: bool,
     observed_bind_addresses: list[str] | None = None,
     observed_expected_bundles: list[Bundle] | None = None,
+    observed_entries: list[str] | None = None,
 ) -> None:
     class FakeControllerServer:
         def __init__(
@@ -153,6 +259,8 @@ def _patch_controller_server(
                 observed_expected_bundles.append(expected_bundle)
 
         async def __aenter__(self) -> "FakeControllerServer":
+            if observed_entries is not None:
+                observed_entries.append("entered")
             return self
 
         async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -167,4 +275,46 @@ def _patch_controller_server(
     monkeypatch.setattr(
         "test_farm.invocation.start_controller_server",
         lambda **kwargs: FakeControllerServer(**kwargs),
+    )
+
+
+def _patch_update_server(
+    monkeypatch: MonkeyPatch,
+    *,
+    manifest_bundle: Bundle | None = None,
+    manifest_error: Exception | None = None,
+) -> None:
+    class FakeUpdateServer:
+        base_url = "http://update-server.example:8081"
+
+        async def __aenter__(self) -> "FakeUpdateServer":
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+            del exc_type
+            del exc
+            del traceback
+
+    monkeypatch.setattr(
+        "test_farm.invocation.start_update_server",
+        lambda **kwargs: FakeUpdateServer(),
+        raising=False,
+    )
+    if manifest_error is not None:
+        monkeypatch.setattr(
+            "test_farm.invocation.fetch_expected_bundle_from_update_server",
+            lambda **kwargs: (_ for _ in ()).throw(manifest_error),
+            raising=False,
+        )
+        return
+
+    if manifest_bundle is None:
+        raise AssertionError(
+            "manifest_bundle must be provided when manifest_error is not set."
+        )
+
+    monkeypatch.setattr(
+        "test_farm.invocation.fetch_expected_bundle_from_update_server",
+        lambda **kwargs: manifest_bundle,
+        raising=False,
     )
