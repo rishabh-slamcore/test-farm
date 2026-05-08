@@ -616,6 +616,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -624,7 +625,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
-    { name = "httpx" },
     { name = "isort" },
     { name = "mypy" },
     { name = "pre-commit" },
@@ -634,6 +634,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0,<1.0.0" },
+    { name = "httpx", specifier = ">=0.28.0,<1.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },
     { name = "typer", specifier = ">=0.12.3,<1.0" },
     { name = "uvicorn", specifier = ">=0.32.0,<1.0.0" },
@@ -642,7 +643,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=24.10.0,<26.0.0" },
-    { name = "httpx", specifier = ">=0.28.0,<1.0.0" },
     { name = "isort", specifier = ">=5.13.2,<6.0.0" },
     { name = "mypy", specifier = ">=1.20.0,<2.0.0" },
     { name = "pre-commit", specifier = ">=4.2.0,<5.0.0" },

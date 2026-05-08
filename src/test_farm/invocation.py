@@ -1,28 +1,31 @@
 """Baseline invocation execution."""
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
-from urllib import error, request
+
+import httpx
 
 from test_farm.controller import start_controller_server
-from test_farm.models import DEFAULT_BUNDLE, Bundle
+from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.subjects.toy_client import (
+    BUNDLE_ID_ENV,
+    CLIENT_ID_ENV,
+    CONTROLLER_REPORTBACK_URL_ENV,
+    INVOCATION_INSTANCE_ENV,
+    UPDATE_SERVER_URL_ENV,
+    ToyClientResult,
+    run_toy_client,
+)
 from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
 TIMED_OUT_ERROR_DETAIL = "No verified receipt received before timeout."
 UPDATE_SERVER_BIND_ADDRESS = "127.0.0.1:8081"
-
-
-class ClientStatus(StrEnum):
-    """Supported client terminal outcomes for the current slice."""
-
-    TIMED_OUT = "timed_out"
-    SUCCESS = "success"
 
 
 type InvocationStatus = Literal["success", "failed"]
@@ -90,7 +93,7 @@ async def execute_invocation(
 
     async with start_update_server(bind_address=UPDATE_SERVER_BIND_ADDRESS) as update_server:
         try:
-            expected_bundle = fetch_expected_bundle_from_update_server(
+            expected_bundle = await fetch_expected_bundle_from_update_server(
                 update_server_base_url=update_server.base_url,
                 bundle_id=DEFAULT_BUNDLE.bundle_id,
             )
@@ -115,8 +118,21 @@ async def execute_invocation(
             client_id=first_client_id,
             expected_bundle=expected_bundle,
         ) as controller_server:
-            first_client_succeeded = await controller_server.wait_for_valid_receipt(
+            client_result_task = run_toy_client(
+                _toy_client_environment(
+                    invocation_instance=invocation_instance,
+                    client_id=first_client_id,
+                    update_server_base_url=update_server.base_url,
+                    controller_reportback_url=f"http://{controller_bind_address}",
+                    bundle_id=expected_bundle.bundle_id,
+                )
+            )
+            receipt_accepted_task = controller_server.wait_for_valid_receipt(
                 receipt_timeout_seconds
+            )
+            toy_client_result, first_client_succeeded = await asyncio.gather(
+                client_result_task,
+                receipt_accepted_task,
             )
 
     finished_at = _utc_now()
@@ -125,6 +141,7 @@ async def execute_invocation(
             index=index,
             first_client_succeeded=first_client_succeeded,
             expected_bundle=expected_bundle,
+            toy_client_result=toy_client_result,
         )
         for index in range(1, client_count + 1)
     ]
@@ -248,7 +265,48 @@ def _derive_invocation_status(client_outcomes: list[ClientOutcome]) -> Invocatio
     )
 
 
-def fetch_expected_bundle_from_update_server(
+def _client_result(
+    *,
+    index: int,
+    first_client_succeeded: bool,
+    expected_bundle: Bundle,
+    toy_client_result: ToyClientResult,
+) -> ClientOutcome:
+    if index != 1 or not first_client_succeeded:
+        return ClientOutcome(
+            client_id=_client_id(index),
+            client_status=ClientStatus.TIMED_OUT,
+            bundle_id=expected_bundle.bundle_id,
+            error_detail=TIMED_OUT_ERROR_DETAIL,
+        )
+
+    del expected_bundle
+    return ClientOutcome(
+        client_id=_client_id(index),
+        client_status=toy_client_result.client_status,
+        bundle_id=toy_client_result.bundle_id,
+        error_detail=toy_client_result.error_detail,
+    )
+
+
+def _toy_client_environment(
+    *,
+    invocation_instance: int,
+    client_id: str,
+    update_server_base_url: str,
+    controller_reportback_url: str,
+    bundle_id: str,
+) -> dict[str, str]:
+    return {
+        INVOCATION_INSTANCE_ENV: str(invocation_instance),
+        CLIENT_ID_ENV: client_id,
+        UPDATE_SERVER_URL_ENV: update_server_base_url,
+        CONTROLLER_REPORTBACK_URL_ENV: controller_reportback_url,
+        BUNDLE_ID_ENV: bundle_id,
+    }
+
+
+async def fetch_expected_bundle_from_update_server(
     *, update_server_base_url: str, bundle_id: str
 ) -> Bundle:
     """Fetch expected bundle metadata from the Update Server manifest.
@@ -261,9 +319,11 @@ def fetch_expected_bundle_from_update_server(
 
     manifest_url = f"{update_server_base_url}/bundles/{bundle_id}/manifest"
     try:
-        with request.urlopen(manifest_url) as response:
-            payload = json.load(response)
-    except (error.HTTPError, error.URLError, json.JSONDecodeError) as fetch_error:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(manifest_url)
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as fetch_error:
         raise RuntimeError(
             f"Could not fetch expected bundle manifest from {manifest_url}."
         ) from fetch_error
@@ -296,29 +356,25 @@ def fetch_expected_bundle_from_update_server(
 
 
 def _client_outcome(
-    index: int, first_client_succeeded: bool, expected_bundle: Bundle
+    *,
+    index: int,
+    first_client_succeeded: bool,
+    expected_bundle: Bundle,
+    toy_client_result: ToyClientResult,
 ) -> ClientOutcome:
-    """Build the client outcome supported by the current slice.
+    """Build the client outcome for one invocation client.
 
     :param index: One-based client index.
     :param first_client_succeeded: Whether the first expected client submitted a valid receipt.
     :param expected_bundle: Bundle metadata expected during the invocation.
+    :param toy_client_result: Terminal outcome returned by the toy client workload.
     :returns: Recorded client outcome.
     """
-
-    if index == 1 and first_client_succeeded:
-        return ClientOutcome(
-            client_id=_client_id(index),
-            client_status=ClientStatus.SUCCESS,
-            bundle_id=expected_bundle.bundle_id,
-            error_detail=None,
-        )
-
-    return ClientOutcome(
-        client_id=_client_id(index),
-        client_status=ClientStatus.TIMED_OUT,
-        bundle_id=expected_bundle.bundle_id,
-        error_detail=TIMED_OUT_ERROR_DETAIL,
+    return _client_result(
+        index=index,
+        first_client_succeeded=first_client_succeeded,
+        expected_bundle=expected_bundle,
+        toy_client_result=toy_client_result,
     )
 
 

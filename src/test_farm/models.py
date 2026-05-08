@@ -2,6 +2,17 @@
 
 import hashlib
 from dataclasses import dataclass
+from enum import StrEnum
+
+
+class ClientStatus(StrEnum):
+    """Terminal client outcomes shared across toy-client and invocation code."""
+
+    TIMED_OUT = "timed_out"
+    SUCCESS = "success"
+    DOWNLOAD_FAILED = "download_failed"
+    CHECKSUM_MISMATCH = "checksum_mismatch"
+    RECEIPT_REJECTED = "receipt_rejected"
 
 
 @dataclass(frozen=True)

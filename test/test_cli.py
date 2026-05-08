@@ -7,12 +7,14 @@ from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from test_farm.cli import app
-from test_farm.models import DEFAULT_BUNDLE, Bundle
+from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.subjects.toy_client import ToyClientResult
 
 
 def test_run_writes_timed_out_result_file_for_one_client(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
     _patch_controller_server(monkeypatch, test_client_success=False)
     _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
     runner = CliRunner()
@@ -57,6 +59,7 @@ def test_run_increments_invocation_instance_from_existing_result_files(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
     _patch_controller_server(monkeypatch, test_client_success=False)
     _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
     runner = CliRunner()
@@ -96,6 +99,7 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
         observed_expected_bundles=observed_expected_bundles,
     )
     _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
 
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
@@ -150,6 +154,7 @@ def test_run_uses_update_server_manifest_bundle_for_controller_and_result_file(
         observed_expected_bundles=observed_expected_bundles,
     )
     _patch_update_server(monkeypatch, manifest_bundle=manifest_bundle)
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
 
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
@@ -195,6 +200,7 @@ def test_run_writes_failed_result_file_when_expected_bundle_fetch_raises_error(
         test_client_success=True,
         observed_entries=observed_controller_entries,
     )
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
     _patch_update_server(
         monkeypatch,
         manifest_error=RuntimeError("Could not fetch expected bundle manifest."),
@@ -301,9 +307,14 @@ def _patch_update_server(
         raising=False,
     )
     if manifest_error is not None:
+
+        async def _raise_manifest_error(**kwargs: object) -> Bundle:
+            del kwargs
+            raise manifest_error
+
         monkeypatch.setattr(
             "test_farm.invocation.fetch_expected_bundle_from_update_server",
-            lambda **kwargs: (_ for _ in ()).throw(manifest_error),
+            _raise_manifest_error,
             raising=False,
         )
         return
@@ -313,8 +324,36 @@ def _patch_update_server(
             "manifest_bundle must be provided when manifest_error is not set."
         )
 
+    async def _return_manifest_bundle(**kwargs: object) -> Bundle:
+        del kwargs
+        return manifest_bundle
+
     monkeypatch.setattr(
         "test_farm.invocation.fetch_expected_bundle_from_update_server",
-        lambda **kwargs: manifest_bundle,
+        _return_manifest_bundle,
+        raising=False,
+    )
+
+
+def _patch_toy_client(
+    monkeypatch: MonkeyPatch,
+    *,
+    client_status: ClientStatus,
+    error_detail: str | None = None,
+) -> None:
+    async def _run(environment: dict[str, str]) -> ToyClientResult:
+        return ToyClientResult(
+            client_status=client_status,
+            bundle_id=environment["TEST_FARM_BUNDLE_ID"],
+            error_detail=error_detail,
+            exit_code=0 if client_status == ClientStatus.SUCCESS else 1,
+            verified_bundle=(
+                DEFAULT_BUNDLE if client_status == ClientStatus.SUCCESS else None
+            ),
+        )
+
+    monkeypatch.setattr(
+        "test_farm.invocation.run_toy_client",
+        _run,
         raising=False,
     )
