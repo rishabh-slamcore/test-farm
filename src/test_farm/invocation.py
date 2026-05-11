@@ -89,7 +89,6 @@ async def execute_invocation(
 
     invocation_instance = allocate_invocation_instance(results_dir)
     started_at = _utc_now()
-    first_client_id = _client_id(1)
 
     async with start_update_server(bind_address=UPDATE_SERVER_BIND_ADDRESS) as update_server:
         try:
@@ -111,26 +110,32 @@ async def execute_invocation(
                 ),
                 "failed",
             )
-
+        # Let expected_bundle be fetched here instead of controller server. Removes
+        # unneccessary responbility on controller server.
         async with start_controller_server(
             bind_address=controller_bind_address,
             invocation_instance=invocation_instance,
-            client_id=first_client_id,
+            client_count=client_count,
             expected_bundle=expected_bundle,
         ) as controller_server:
-            client_result_task = run_toy_client(
-                _toy_client_environment(
-                    invocation_instance=invocation_instance,
-                    client_id=first_client_id,
-                    update_server_base_url=update_server.base_url,
-                    controller_reportback_url=f"http://{controller_bind_address}",
-                    bundle_id=expected_bundle.bundle_id,
-                )
+            client_result_task = asyncio.gather(
+                *[
+                    run_toy_client(
+                        _toy_client_environment(
+                            invocation_instance=invocation_instance,
+                            client_id=client_id,
+                            update_server_base_url=update_server.base_url,
+                            controller_reportback_url=f"http://{controller_bind_address}",
+                            bundle_id=expected_bundle.bundle_id,
+                        )
+                    )
+                    for client_id in controller_server.expected_client_ids
+                ]
             )
-            receipt_accepted_task = controller_server.wait_for_valid_receipt(
+            receipt_accepted_task = controller_server.wait_for_expected_receipts(
                 receipt_timeout_seconds
             )
-            toy_client_result, first_client_succeeded = await asyncio.gather(
+            toy_client_results, _all_receipts_received = await asyncio.gather(
                 client_result_task,
                 receipt_accepted_task,
             )
@@ -138,12 +143,16 @@ async def execute_invocation(
     finished_at = _utc_now()
     client_outcomes = [
         _client_outcome(
-            index=index,
-            first_client_succeeded=first_client_succeeded,
+            client_id=client_id,
+            accepted_client_ids=controller_server.accepted_client_ids,
             expected_bundle=expected_bundle,
             toy_client_result=toy_client_result,
         )
-        for index in range(1, client_count + 1)
+        for client_id, toy_client_result in zip(
+            controller_server.expected_client_ids,
+            toy_client_results,
+            strict=True,
+        )
     ]
     invocation_status = _derive_invocation_status(client_outcomes)
     result_file = _write_result_file(
@@ -267,14 +276,17 @@ def _derive_invocation_status(client_outcomes: list[ClientOutcome]) -> Invocatio
 
 def _client_result(
     *,
-    index: int,
-    first_client_succeeded: bool,
+    client_id: str,
+    accepted_client_ids: frozenset[str],
     expected_bundle: Bundle,
     toy_client_result: ToyClientResult,
 ) -> ClientOutcome:
-    if index != 1 or not first_client_succeeded:
+    if (
+        toy_client_result.client_status == ClientStatus.SUCCESS
+        and client_id not in accepted_client_ids
+    ):
         return ClientOutcome(
-            client_id=_client_id(index),
+            client_id=client_id,
             client_status=ClientStatus.TIMED_OUT,
             bundle_id=expected_bundle.bundle_id,
             error_detail=TIMED_OUT_ERROR_DETAIL,
@@ -282,7 +294,7 @@ def _client_result(
 
     del expected_bundle
     return ClientOutcome(
-        client_id=_client_id(index),
+        client_id=client_id,
         client_status=toy_client_result.client_status,
         bundle_id=toy_client_result.bundle_id,
         error_detail=toy_client_result.error_detail,
@@ -357,35 +369,25 @@ async def fetch_expected_bundle_from_update_server(
 
 def _client_outcome(
     *,
-    index: int,
-    first_client_succeeded: bool,
+    client_id: str,
+    accepted_client_ids: frozenset[str],
     expected_bundle: Bundle,
     toy_client_result: ToyClientResult,
 ) -> ClientOutcome:
     """Build the client outcome for one invocation client.
 
-    :param index: One-based client index.
-    :param first_client_succeeded: Whether the first expected client submitted a valid receipt.
+    :param client_id: Stable expected client identifier.
+    :param accepted_client_ids: Client IDs with accepted Verified Receipts.
     :param expected_bundle: Bundle metadata expected during the invocation.
     :param toy_client_result: Terminal outcome returned by the toy client workload.
     :returns: Recorded client outcome.
     """
     return _client_result(
-        index=index,
-        first_client_succeeded=first_client_succeeded,
+        client_id=client_id,
+        accepted_client_ids=accepted_client_ids,
         expected_bundle=expected_bundle,
         toy_client_result=toy_client_result,
     )
-
-
-def _client_id(index: int) -> str:
-    """Create the stable client identifier for one client index.
-
-    :param index: One-based client index.
-    :returns: Stable client identifier.
-    """
-
-    return f"client-{index:03d}"
 
 
 def _utc_now() -> str:

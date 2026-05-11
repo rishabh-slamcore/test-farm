@@ -169,6 +169,114 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
     ]
 
 
+def test_run_starts_one_toy_client_per_expected_client_and_records_every_success(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    observed_environments: list[dict[str, str]] = []
+    _patch_controller_server(monkeypatch, test_client_success=True)
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
+    _patch_toy_client(
+        monkeypatch,
+        client_status=ClientStatus.SUCCESS,
+        observed_environments=observed_environments,
+    )
+
+    runner = CliRunner()
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text("client_count: 2\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--receipt-timeout-seconds",
+            "2",
+        ],
+    )
+
+    result_file = tmp_path / "results" / "result_1.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 0
+    assert [environment["TEST_FARM_CLIENT_ID"] for environment in observed_environments] == [
+        "client-001",
+        "client-002",
+    ]
+    assert payload["invocation_status"] == "success"
+    assert payload["clients"] == [
+        {
+            "client_id": "client-001",
+            "client_status": "success",
+            "bundle_id": DEFAULT_BUNDLE.bundle_id,
+            "error_detail": None,
+        },
+        {
+            "client_id": "client-002",
+            "client_status": "success",
+            "bundle_id": DEFAULT_BUNDLE.bundle_id,
+            "error_detail": None,
+        },
+    ]
+
+
+def test_run_fails_without_hiding_successful_clients_when_a_receipt_is_missing(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _patch_controller_server(
+        monkeypatch,
+        test_client_success=False,
+        accepted_client_ids=frozenset({"client-001"}),
+    )
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
+    _patch_toy_client(
+        monkeypatch,
+        client_status=ClientStatus.SUCCESS,
+        outcomes_by_client_id={
+            "client-001": (ClientStatus.SUCCESS, None),
+            "client-002": (ClientStatus.DOWNLOAD_FAILED, "bundle download failed"),
+        },
+    )
+
+    runner = CliRunner()
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text("client_count: 2\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--receipt-timeout-seconds",
+            "2",
+        ],
+    )
+
+    result_file = tmp_path / "results" / "result_1.json"
+    payload = json.loads(result_file.read_text(encoding="utf-8"))
+
+    assert result.exit_code == 1
+    assert payload["invocation_status"] == "failed"
+    assert payload["clients"] == [
+        {
+            "client_id": "client-001",
+            "client_status": "success",
+            "bundle_id": DEFAULT_BUNDLE.bundle_id,
+            "error_detail": None,
+        },
+        {
+            "client_id": "client-002",
+            "client_status": "download_failed",
+            "bundle_id": DEFAULT_BUNDLE.bundle_id,
+            "error_detail": "bundle download failed",
+        },
+    ]
+
+
 def test_run_uses_update_server_manifest_bundle_for_controller_and_result_file(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -274,6 +382,7 @@ def _patch_controller_server(
     observed_bind_addresses: list[str] | None = None,
     observed_expected_bundles: list[Bundle] | None = None,
     observed_entries: list[str] | None = None,
+    accepted_client_ids: frozenset[str] | None = None,
 ) -> None:
     class FakeControllerServer:
         def __init__(
@@ -281,15 +390,23 @@ def _patch_controller_server(
             *,
             bind_address: str,
             invocation_instance: int,
-            client_id: str,
+            client_count: int,
             expected_bundle: Bundle,
         ) -> None:
             del invocation_instance
-            del client_id
             if observed_bind_addresses is not None:
                 observed_bind_addresses.append(bind_address)
             if observed_expected_bundles is not None:
                 observed_expected_bundles.append(expected_bundle)
+            self.expected_client_ids = tuple(
+                f"client-{index:03d}" for index in range(1, client_count + 1)
+            )
+            if accepted_client_ids is not None:
+                self.accepted_client_ids = accepted_client_ids
+            elif test_client_success:
+                self.accepted_client_ids = frozenset(self.expected_client_ids)
+            else:
+                self.accepted_client_ids = frozenset()
 
         async def __aenter__(self) -> "FakeControllerServer":
             if observed_entries is not None:
@@ -301,7 +418,7 @@ def _patch_controller_server(
             del exc
             del traceback
 
-        async def wait_for_valid_receipt(self, timeout_seconds: int) -> bool:
+        async def wait_for_expected_receipts(self, timeout_seconds: int) -> bool:
             del timeout_seconds
             return test_client_success
 
@@ -367,15 +484,25 @@ def _patch_toy_client(
     *,
     client_status: ClientStatus,
     error_detail: str | None = None,
+    observed_environments: list[dict[str, str]] | None = None,
+    outcomes_by_client_id: dict[str, tuple[ClientStatus, str | None]] | None = None,
 ) -> None:
     async def _run(environment: dict[str, str]) -> ToyClientResult:
+        if observed_environments is not None:
+            observed_environments.append(environment)
+        resolved_client_status = client_status
+        resolved_error_detail = error_detail
+        if outcomes_by_client_id is not None:
+            resolved_client_status, resolved_error_detail = outcomes_by_client_id[
+                environment["TEST_FARM_CLIENT_ID"]
+            ]
         return ToyClientResult(
-            client_status=client_status,
+            client_status=resolved_client_status,
             bundle_id=environment["TEST_FARM_BUNDLE_ID"],
-            error_detail=error_detail,
-            exit_code=0 if client_status == ClientStatus.SUCCESS else 1,
+            error_detail=resolved_error_detail,
+            exit_code=0 if resolved_client_status == ClientStatus.SUCCESS else 1,
             verified_bundle=(
-                DEFAULT_BUNDLE if client_status == ClientStatus.SUCCESS else None
+                DEFAULT_BUNDLE if resolved_client_status == ClientStatus.SUCCESS else None
             ),
         )
 

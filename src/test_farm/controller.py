@@ -28,15 +28,30 @@ class ControllerState:
         self,
         *,
         invocation_instance: int,
-        client_id: str,
+        client_count: int,
         expected_bundle: Bundle,
     ) -> None:
         self._invocation_instance = invocation_instance
-        self._client_id = client_id
+        self._expected_client_ids = tuple(
+            _client_id(index) for index in range(1, client_count + 1)
+        )
         self._expected_bundle = expected_bundle
-        self._receipt_event = asyncio.Event()
+        self._accepted_client_ids: set[str] = set()
+        self._all_receipts_event = asyncio.Event()
         self._receipt_channel_open = True
         self._lock = asyncio.Lock()
+
+    @property
+    def expected_client_ids(self) -> tuple[str, ...]:
+        """Return deterministic Client IDs for this invocation."""
+
+        return self._expected_client_ids
+
+    @property
+    def accepted_client_ids(self) -> frozenset[str]:
+        """Return Client IDs with an accepted Verified Receipt."""
+
+        return frozenset(self._accepted_client_ids)
 
     async def handle_receipt(
         self,
@@ -90,20 +105,30 @@ class ControllerState:
                         "detail": "Receipt channel is closed for this invocation.",
                     },
                 )
-            self._receipt_channel_open = False
-            self._receipt_event.set()
+            if route_client_id in self._accepted_client_ids:
+                return ControllerResponse(
+                    status_code=409,
+                    body={
+                        "status": "rejected",
+                        "detail": "Receipt client_id already reported a valid receipt.",
+                    },
+                )
+            self._accepted_client_ids.add(route_client_id)
+            if len(self._accepted_client_ids) == len(self._expected_client_ids):
+                self._receipt_channel_open = False
+                self._all_receipts_event.set()
 
         return ControllerResponse(status_code=202, body={"status": "accepted"})
 
-    async def wait_for_valid_receipt(self, timeout_seconds: int) -> bool:
-        """Wait for the one valid receipt expected by this slice.
+    async def wait_for_expected_receipts(self, timeout_seconds: int) -> bool:
+        """Wait for every expected valid receipt for this invocation.
 
         :param timeout_seconds: Receipt wait timeout.
-        :returns: ``True`` when a valid receipt is accepted, else ``False``.
+        :returns: ``True`` when every expected receipt is accepted, else ``False``.
         """
 
         try:
-            await asyncio.wait_for(self._receipt_event.wait(), timeout=timeout_seconds)
+            await asyncio.wait_for(self._all_receipts_event.wait(), timeout=timeout_seconds)
         except TimeoutError:
             async with self._lock:
                 self._receipt_channel_open = False
@@ -121,8 +146,8 @@ class ControllerState:
         if route_invocation_instance != self._invocation_instance:
             return "Receipt invocation_instance did not match the current invocation."
 
-        if route_client_id != self._client_id:
-            return "Receipt client_id did not match the expected client."
+        if route_client_id not in self._expected_client_ids:
+            return "Receipt client_id did not match an expected client."
 
         if receipt_bundle.bundle_id != self._expected_bundle.bundle_id:
             return "Receipt bundle_id did not match the expected bundle."
@@ -191,10 +216,22 @@ class ControllerServer:
         if self._server_task is not None:
             await self._server_task
 
-    async def wait_for_valid_receipt(self, timeout_seconds: int) -> bool:
-        """Wait for the one valid receipt expected by the wrapped state."""
+    @property
+    def expected_client_ids(self) -> tuple[str, ...]:
+        """Return deterministic Client IDs for this invocation."""
 
-        return await self._state.wait_for_valid_receipt(timeout_seconds)
+        return self._state.expected_client_ids
+
+    @property
+    def accepted_client_ids(self) -> frozenset[str]:
+        """Return Client IDs with an accepted Verified Receipt."""
+
+        return self._state.accepted_client_ids
+
+    async def wait_for_expected_receipts(self, timeout_seconds: int) -> bool:
+        """Wait for every expected valid receipt in the wrapped state."""
+
+        return await self._state.wait_for_expected_receipts(timeout_seconds)
 
     async def _serve(self) -> None:
         await self._server.serve()
@@ -211,14 +248,14 @@ def start_controller_server(
     *,
     bind_address: str,
     invocation_instance: int,
-    client_id: str,
+    client_count: int,
     expected_bundle: Bundle,
 ) -> ControllerServer:
-    """Create the Controller server for one expected client receipt."""
+    """Create the Controller server for one invocation's expected client receipts."""
 
     state = ControllerState(
         invocation_instance=invocation_instance,
-        client_id=client_id,
+        client_count=client_count,
         expected_bundle=expected_bundle,
     )
     return ControllerServer(bind_address=bind_address, state=state)
@@ -270,3 +307,9 @@ def _parse_bind_address(bind_address: str) -> tuple[str, int]:
         )
 
     return host, port
+
+
+def _client_id(index: int) -> str:
+    """Create the stable client identifier for one client index."""
+
+    return f"client-{index:03d}"

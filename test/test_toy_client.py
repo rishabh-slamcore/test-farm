@@ -89,7 +89,7 @@ async def _run_successful_client() -> ToyClientResult:
         async with start_controller_server(
             bind_address=controller_bind_address,
             invocation_instance=7,
-            client_id="client-001",
+            client_count=1,
             expected_bundle=DEFAULT_BUNDLE,
         ) as controller_server:
             result = await run_toy_client(
@@ -101,7 +101,7 @@ async def _run_successful_client() -> ToyClientResult:
                     "TEST_FARM_BUNDLE_ID": DEFAULT_BUNDLE.bundle_id,
                 },
             )
-            receipt_accepted = await controller_server.wait_for_valid_receipt(
+            receipt_accepted = await controller_server.wait_for_expected_receipts(
                 timeout_seconds=1
             )
 
@@ -117,13 +117,13 @@ async def _run_rejected_client() -> ToyClientResult:
         async with start_controller_server(
             bind_address=controller_bind_address,
             invocation_instance=7,
-            client_id="client-999",
+            client_count=1,
             expected_bundle=DEFAULT_BUNDLE,
         ):
             return await run_toy_client(
                 {
                     "TEST_FARM_INVOCATION_INSTANCE": "7",
-                    "TEST_FARM_CLIENT_ID": "client-001",
+                    "TEST_FARM_CLIENT_ID": "client-999",
                     "TEST_FARM_UPDATE_SERVER_URL": update_server.base_url,
                     "TEST_FARM_CONTROLLER_REPORTBACK_URL": f"http://{controller_bind_address}",
                     "TEST_FARM_BUNDLE_ID": DEFAULT_BUNDLE.bundle_id,
