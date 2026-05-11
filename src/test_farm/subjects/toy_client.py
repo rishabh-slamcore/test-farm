@@ -35,7 +35,7 @@ async def run_toy_client(environment: Mapping[str, str] | None = None) -> ToyCli
     :param environment: Optional environment-variable mapping for tests.
     :returns: Structured toy-client terminal outcome.
     """
-
+    # Todo: Add try catch exception handling if environment keys missing.
     resolved_environment = environ if environment is None else environment
     invocation_instance = int(resolved_environment[INVOCATION_INSTANCE_ENV])
     client_id = resolved_environment[CLIENT_ID_ENV]

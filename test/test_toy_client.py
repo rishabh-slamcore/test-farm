@@ -132,6 +132,8 @@ async def _run_rejected_client() -> ToyClientResult:
 
 
 def _allocate_bind_address() -> str:
+    # Tests start real local servers, so each one needs an available localhost
+    # port without relying on a hardcoded value that may already be in use.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind(("127.0.0.1", 0))
         host, port = server_socket.getsockname()

@@ -14,6 +14,9 @@ from test_farm.models import DEFAULT_BUNDLE
 def test_execute_invocation_completes_one_client_baseline_with_real_subjects(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
+    """Verify orchestration is working correctly by starting real update and controller server.
+    Toy client runs and posts valid receipt, with results file then verified.
+    """
     scenario_file = tmp_path / "baseline.yaml"
     scenario_file.write_text("client_count: 1\n", encoding="utf-8")
     monkeypatch.setattr(

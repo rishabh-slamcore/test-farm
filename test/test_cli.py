@@ -3,12 +3,51 @@
 import json
 from pathlib import Path
 
+import pytest
 from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from test_farm.cli import app
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
 from test_farm.subjects.toy_client import ToyClientResult
+
+
+@pytest.mark.parametrize(
+    ("scenario_contents", "expected_error"),
+    [
+        ("not: [valid yaml\n", "is not valid YAML"),
+        ("- client_count: 1\n", "must contain a mapping with only client_count"),
+        ("{}\n", "is missing required field client_count"),
+        ("client_count: 1\nmode: baseline\n", "contains unknown fields: mode"),
+        ("client_count: 0\n", "must set client_count to a positive integer"),
+        ("client_count: true\n", "must set client_count to a positive integer"),
+    ],
+)
+def test_run_exits_with_code_2_for_invalid_scenario_files(
+    tmp_path: Path,
+    scenario_contents: str,
+    expected_error: str,
+) -> None:
+    runner = CliRunner()
+    scenario_file = tmp_path / "invalid.yaml"
+    scenario_file.write_text(scenario_contents, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--controller-reportback-url",
+            "http://controller.example:8080",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert expected_error in result.stderr
+    assert str(scenario_file) in result.stderr
+    assert not (tmp_path / "results").exists()
 
 
 def test_run_writes_timed_out_result_file_for_one_client(
