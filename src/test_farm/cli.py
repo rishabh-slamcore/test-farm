@@ -22,14 +22,12 @@ def run(
         ..., dir_okay=False, readable=True, resolve_path=True
     ),
     controller_bind_address: str = typer.Option(..., "--controller-bind-address"),
-    controller_reportback_url: str = typer.Option(..., "--controller-reportback-url"),
     receipt_timeout_seconds: int = typer.Option(0, "--receipt-timeout-seconds", min=0),
     results_dir: Path = typer.Option(
         Path("results"), "--results-dir", file_okay=False, resolve_path=True
     ),
 ) -> None:
     """Run the current baseline invocation slice."""
-    del controller_reportback_url
 
     try:
         scenario = load_scenario_file(scenario_file)

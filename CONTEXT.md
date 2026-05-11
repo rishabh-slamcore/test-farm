@@ -48,12 +48,9 @@ _Avoid_: Partial success, manual verdict
 A test-farm-owned path for clients to report their final update outcome to the Controller independently of the Update Server.
 _Avoid_: Hawkbit status, server logs, shared host files
 
-**Controller Reportback URL**:
-The network-reachable base URL clients use to post Verified Receipts to the Controller's Receipt Channel.
-_Avoid_: localhost, controller advertise URL, callback URL
-
 **Controller Bind Address**:
 The local interface and port where the Controller listens for Receipt Channel HTTP requests.
+The **Controller Reportback URL** is derived from this by adding the `http://` scheme for clients posting Verified Receipts to the Receipt Channel.
 _Avoid_: Implicit port, auto-detected listener
 
 **Update Server**:
@@ -84,8 +81,8 @@ _Avoid_: NAT, masquerading
 - A **Verified Receipt** identifies the **invocation_instance**, **Client ID**, and **Bundle ID** it belongs to.
 - The v1 **Bundle ID** is required and defaults to `baseline`.
 - The v1 **Scenario File** declares only the client count; bundle size and checksum come from the Update Server manifest.
-- The Controller passes invocation_instance, Client ID, Update Server URL, Controller Reportback URL, and Bundle ID to each client container as environment variables.
-- Milestone 1 requires an explicit **Controller Bind Address** and explicit **Controller Reportback URL**.
+- The Controller passes invocation_instance, Client ID, Update Server URL, the **Controller Reportback URL** derived from the **Controller Bind Address**, and Bundle ID to each client container as environment variables.
+- Milestone 1 requires an explicit **Controller Bind Address**.
 - The Controller and Update Server expose `GET /health` for readiness and debugging.
 - The Receipt Channel receives `POST /invocations/{invocation_instance}/clients/{client_id}/receipt`.
 - The Update Server serves `GET /bundles/{bundle_id}/manifest` and `GET /bundles/{bundle_id}`.
@@ -133,16 +130,16 @@ _Avoid_: NAT, masquerading
 > **Domain expert:** "No — clients report outcomes through the **Receipt Channel** so verification stays under test-farm's control."
 
 > **Dev:** "Can clients post receipts to localhost?"
-> **Domain expert:** "No — clients post to the **Controller Reportback URL**, which must be reachable from their container network."
+> **Domain expert:** "No — clients post to the **Controller Reportback URL** derived from the **Controller Bind Address**, and it must be reachable from their container network."
 
 > **Dev:** "Can the Controller choose its receipt port automatically?"
-> **Domain expert:** "No — Milestone 1 uses an explicit **Controller Bind Address** and explicit **Controller Reportback URL**."
+> **Domain expert:** "No — Milestone 1 uses an explicit **Controller Bind Address**."
 
 > **Dev:** "Should readiness use `/healthz`?"
 > **Domain expert:** "No — use `GET /health` for both the Controller and Update Server."
 
 > **Dev:** "Where does a client post its receipt?"
-> **Domain expert:** "To `POST /invocations/{invocation_instance}/clients/{client_id}/receipt` on the **Controller Reportback URL**."
+> **Domain expert:** "To `POST /invocations/{invocation_instance}/clients/{client_id}/receipt` on the **Controller Reportback URL** derived from the **Controller Bind Address**."
 
 > **Dev:** "Does the first baseline result need live client log streaming?"
 > **Domain expert:** "No — Milestone 1 needs the final **Result File** and failure log capture; live streaming can follow later."
@@ -172,7 +169,7 @@ _Avoid_: NAT, masquerading
 - "client id" could mean Docker's generated container ID or hostname; resolved: **Client ID** is a test-farm-assigned stable client name within an **invocation**.
 - "successful update" could mean server-side response or client-side receipt; resolved: success requires **Verified Receipt**.
 - "results" could mean source-server state, Hawkbit state, logs, or client callback; resolved: test-farm client outcomes flow through the **Receipt Channel**.
-- "controller advertise URL" and "callback URL" referred to where clients post receipts; resolved: use **Controller Reportback URL**.
+- "controller advertise URL" referred to where clients post receipts; resolved: use **Controller Reportback URL** only as the URL derived from the **Controller Bind Address**.
 - "controller port" could be implicit or auto-selected; resolved: use an explicit **Controller Bind Address** in Milestone 1.
 - "update source" and "toy server" referred to the server role that provides bundles; resolved: use **Update Server**.
 - "router" could mean a NAT gateway or a routed impairment node; resolved: the **Router Container** uses **Explicit Routing**, not NAT.

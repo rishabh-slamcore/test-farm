@@ -39,8 +39,6 @@ def test_run_exits_with_code_2_for_invalid_scenario_files(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
         ],
     )
 
@@ -68,8 +66,6 @@ def test_run_writes_timed_out_result_file_for_one_client(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
         ],
     )
     result_file = tmp_path / "results" / "result_1.json"
@@ -117,8 +113,6 @@ def test_run_increments_invocation_instance_from_existing_result_files(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
         ],
     )
 
@@ -151,8 +145,6 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
             "--receipt-timeout-seconds",
             "2",
         ],
@@ -206,8 +198,6 @@ def test_run_uses_update_server_manifest_bundle_for_controller_and_result_file(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
             "--receipt-timeout-seconds",
             "2",
         ],
@@ -256,8 +246,6 @@ def test_run_writes_failed_result_file_when_expected_bundle_fetch_raises_error(
             str(scenario_file),
             "--controller-bind-address",
             "127.0.0.1:8080",
-            "--controller-reportback-url",
-            "http://controller.example:8080",
         ],
     )
     result_file = tmp_path / "results" / "result_1.json"
