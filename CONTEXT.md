@@ -32,9 +32,10 @@ _Avoid_: Filename, URL, artifact path
 A developer-authored YAML file describing the intended invocation shape.
 _Avoid_: Bundle manifest, result file
 
-**Verified Receipt**:
-A client outcome where the client has downloaded the expected bundle, matched its byte count and checksum, and reported that result back to the harness.
-_Avoid_: Server-side delivery, HTTP 200 success
+**Receipt**:
+A client-posted outcome observation delivered to the Controller over the Receipt Channel.
+For a successful download it includes a reported bundle; the Controller then derives the final client outcome.
+_Avoid_: Verified receipt, server-side delivery, HTTP 200 success
 
 **Client Status**:
 The terminal outcome recorded for one client in a Result File.
@@ -50,7 +51,7 @@ _Avoid_: Hawkbit status, server logs, shared host files
 
 **Controller Bind Address**:
 The local interface and port where the Controller listens for Receipt Channel HTTP requests.
-The **Controller Reportback URL** is derived from this by adding the `http://` scheme for clients posting Verified Receipts to the Receipt Channel.
+The **Controller Reportback URL** is derived from this by adding the `http://` scheme for clients posting Receipts to the Receipt Channel.
 _Avoid_: Implicit port, auto-detected listener
 
 **Update Server**:
@@ -69,7 +70,7 @@ _Avoid_: NAT, masquerading
 
 - A **baseline result** precedes impaired scenario results in the roadmap.
 - A **baseline result** exercises the same harness lifecycle as later reliability scenarios, but without applying network impairment.
-- A **baseline result** is successful only when every required client produces a **Verified Receipt**.
+- A **baseline result** is successful only when every required client produces a successful **Receipt** outcome after Controller validation.
 - An **invocation** has exactly one **invocation_instance**.
 - An **invocation_instance** is allocated by scanning existing **Result Files** and incrementing the highest recorded number.
 - A **Result File** is JSON named `result_<invocation_instance>.json`.
@@ -78,7 +79,7 @@ _Avoid_: NAT, masquerading
 - An **invocation** tears down its containers and Docker networks by default, unless `--keep-containers` is set for debugging.
 - An **invocation** has one or more **Client IDs**.
 - **Client IDs** are Controller-generated from the requested client count as `client-001`, `client-002`, and so on.
-- A **Verified Receipt** identifies the **invocation_instance**, **Client ID**, and **Bundle ID** it belongs to.
+- A **Receipt** identifies the **invocation_instance**, **Client ID**, and **Bundle ID** it belongs to.
 - The v1 **Bundle ID** is required and defaults to `baseline`.
 - The v1 **Scenario File** declares only the client count; bundle size and checksum come from the Update Server manifest.
 - The Controller passes invocation_instance, Client ID, Update Server URL, the **Controller Reportback URL** derived from the **Controller Bind Address**, and Bundle ID to each client container as environment variables.
@@ -87,10 +88,10 @@ _Avoid_: NAT, masquerading
 - The Receipt Channel receives `POST /invocations/{invocation_instance}/clients/{client_id}/receipt`.
 - The Update Server serves `GET /bundles/{bundle_id}/manifest` and `GET /bundles/{bundle_id}`.
 - Client containers receive `TEST_FARM_INVOCATION_INSTANCE`, `TEST_FARM_CLIENT_ID`, `TEST_FARM_UPDATE_SERVER_URL`, `TEST_FARM_CONTROLLER_REPORTBACK_URL`, and `TEST_FARM_BUNDLE_ID`.
-- A **Verified Receipt** is delivered over the **Receipt Channel**.
-- A **Client Status** is one of `success`, `download_failed`, `checksum_mismatch`, `receipt_rejected`, `timed_out`, or `container_failed`.
+- A **Receipt** is delivered over the **Receipt Channel**.
+- A **Client Status** is one of `success`, `download_failed`, `checksum_mismatch`, or `timed_out`.
 - An **Invocation Status** is `success` only when every expected client has **Client Status** `success`; otherwise it is `failed`.
-- An **Update Server** provides the bundle that clients use to produce a **Verified Receipt**.
+- An **Update Server** provides the bundle that clients use to produce a **Receipt**.
 - A **Router Container** connects the Update Server network and client network using **Explicit Routing**.
 - A **Router Container** applies impairment uniformly to client-bound update traffic.
 - Milestone 1 includes the **Router Container** for forwarding but performs no `tc` operations.
@@ -118,7 +119,7 @@ _Avoid_: NAT, masquerading
 > **Domain expert:** "No — the Controller passes each client's configuration as environment variables."
 
 > **Dev:** "The toy server returned HTTP 200 for the bundle. Is that enough?"
-> **Domain expert:** "No — the client must produce a **Verified Receipt**."
+> **Domain expert:** "No — the client must produce a **Receipt**, and the Controller decides whether it counts as success."
 
 > **Dev:** "Should the Result File record raw HTTP status codes as client outcomes?"
 > **Domain expert:** "No — record a **Client Status** and keep raw details in an error field."
@@ -167,7 +168,7 @@ _Avoid_: NAT, masquerading
 - "bundle id" could mean a filename, URL, storage path, or unnecessary v1 concept; resolved: **Bundle ID** is required, identifies the expected update bundle independently of where it is served, and defaults to `baseline` in v1.
 - "scenario file" could include artifact verification metadata; resolved: the v1 **Scenario File** declares client count only, while bundle size and checksum come from the Update Server manifest.
 - "client id" could mean Docker's generated container ID or hostname; resolved: **Client ID** is a test-farm-assigned stable client name within an **invocation**.
-- "successful update" could mean server-side response or client-side receipt; resolved: success requires **Verified Receipt**.
+- "successful update" could mean server-side response or client-side receipt; resolved: success requires a Controller-validated successful **Receipt**.
 - "results" could mean source-server state, Hawkbit state, logs, or client callback; resolved: test-farm client outcomes flow through the **Receipt Channel**.
 - "controller advertise URL" referred to where clients post receipts; resolved: use **Controller Reportback URL** only as the URL derived from the **Controller Bind Address**.
 - "controller port" could be implicit or auto-selected; resolved: use an explicit **Controller Bind Address** in Milestone 1.

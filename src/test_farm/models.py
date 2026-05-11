@@ -3,6 +3,7 @@
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 
 class ClientStatus(StrEnum):
@@ -12,7 +13,6 @@ class ClientStatus(StrEnum):
     SUCCESS = "success"
     DOWNLOAD_FAILED = "download_failed"
     CHECKSUM_MISMATCH = "checksum_mismatch"
-    RECEIPT_REJECTED = "receipt_rejected"
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,25 @@ class Bundle:
             "byte_count": self.byte_count,
             "checksum": self.checksum,
         }
+
+
+@dataclass(frozen=True)
+class Receipt:
+    """Normalized client observation posted to the controller receipt route."""
+
+    client_status: Literal["success", "download_failed"]
+    reported_bundle: Bundle | None
+    error_detail: str | None
+
+    def to_payload(self) -> dict[str, object]:
+        """Serialize the receipt for JSON transport."""
+
+        payload: dict[str, object] = {"client_status": self.client_status}
+        if self.reported_bundle is not None:
+            payload["reported_bundle"] = self.reported_bundle.to_payload()
+        if self.error_detail is not None:
+            payload["error_detail"] = self.error_detail
+        return payload
 
 
 DEFAULT_BUNDLE_BYTES = b"baseline bundle placeholder\n"

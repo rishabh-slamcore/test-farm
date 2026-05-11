@@ -6,11 +6,12 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 import httpx
 
-from test_farm.controller import start_controller_server
+from test_farm.controller import ClientOutcome as ControllerClientOutcome
+from test_farm.controller import ControllerServer, start_controller_server
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
 from test_farm.subjects.toy_client import (
     BUNDLE_ID_ENV,
@@ -18,13 +19,12 @@ from test_farm.subjects.toy_client import (
     CONTROLLER_REPORTBACK_URL_ENV,
     INVOCATION_INSTANCE_ENV,
     UPDATE_SERVER_URL_ENV,
-    ToyClientResult,
     run_toy_client,
 )
 from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
-TIMED_OUT_ERROR_DETAIL = "No verified receipt received before timeout."
+TIMED_OUT_ERROR_DETAIL = "No receipt received before timeout."
 UPDATE_SERVER_BIND_ADDRESS = "127.0.0.1:8081"
 
 
@@ -39,15 +39,17 @@ class ClientOutcome:
     client_status: ClientStatus
     bundle_id: str
     error_detail: str | None
+    reported_bundle: Bundle | None = None
 
 
-class ClientOutcomePayload(TypedDict):
+class ClientOutcomePayload(TypedDict, total=False):
     """Serialized one-client result entry."""
 
     client_id: str
     client_status: ClientStatus
     bundle_id: str
     error_detail: str | None
+    reported_bundle: dict[str, str | int]
 
 
 class InvocationErrorPayload(TypedDict):
@@ -118,8 +120,8 @@ async def execute_invocation(
             client_count=client_count,
             expected_bundle=expected_bundle,
         ) as controller_server:
-            client_result_task = asyncio.gather(
-                *[
+            toy_client_tasks = [
+                asyncio.create_task(
                     run_toy_client(
                         _toy_client_environment(
                             invocation_instance=invocation_instance,
@@ -129,30 +131,30 @@ async def execute_invocation(
                             bundle_id=expected_bundle.bundle_id,
                         )
                     )
-                    for client_id in controller_server.expected_client_ids
-                ]
+                )
+                for client_id in controller_server.expected_client_ids
+            ]
+            all_toy_clients_done_task = asyncio.create_task(
+                _wait_for_toy_clients(toy_client_tasks)
             )
-            receipt_accepted_task = controller_server.wait_for_expected_receipts(
-                receipt_timeout_seconds
+            all_client_outcomes_recorded_task = asyncio.create_task(
+                controller_server.wait_for_client_outcomes(receipt_timeout_seconds)
             )
-            toy_client_results, _all_receipts_received = await asyncio.gather(
-                client_result_task,
-                receipt_accepted_task,
+            await _wait_for_invocation_completion(
+                toy_client_tasks=toy_client_tasks,
+                all_toy_clients_done_task=all_toy_clients_done_task,
+                all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
+                expected_client_ids=controller_server.expected_client_ids,
+                controller_server=controller_server,
             )
-
     finished_at = _utc_now()
     client_outcomes = [
-        _client_outcome(
+        _result_client_outcome(
             client_id=client_id,
-            accepted_client_ids=controller_server.accepted_client_ids,
+            controller_client_outcome=controller_server.client_outcomes.get(client_id),
             expected_bundle=expected_bundle,
-            toy_client_result=toy_client_result,
         )
-        for client_id, toy_client_result in zip(
-            controller_server.expected_client_ids,
-            toy_client_results,
-            strict=True,
-        )
+        for client_id in controller_server.expected_client_ids
     ]
     invocation_status = _derive_invocation_status(client_outcomes)
     result_file = _write_result_file(
@@ -169,6 +171,84 @@ async def execute_invocation(
         ),
     )
     return result_file, invocation_status
+
+
+async def _wait_for_invocation_completion(
+    *,
+    toy_client_tasks: list[asyncio.Task[int]],
+    all_toy_clients_done_task: asyncio.Task[list[int | BaseException]],
+    all_client_outcomes_recorded_task: asyncio.Task[bool],
+    expected_client_ids: tuple[str, ...],
+    controller_server: ControllerServer,
+) -> None:
+    waitables: set[asyncio.Task[object]] = {
+        cast(asyncio.Task[object], all_toy_clients_done_task),
+        cast(asyncio.Task[object], all_client_outcomes_recorded_task),
+    }
+    done, _pending = await asyncio.wait(
+        waitables,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+
+    if all_client_outcomes_recorded_task in done:
+        all_client_outcomes_recorded = all_client_outcomes_recorded_task.result()
+        if not all_client_outcomes_recorded:
+            for toy_client_task in toy_client_tasks:
+                toy_client_task.cancel()
+            await asyncio.gather(*toy_client_tasks, return_exceptions=True)
+            await all_toy_clients_done_task
+            return
+
+        await all_toy_clients_done_task
+        return
+
+    await all_toy_clients_done_task
+    if _have_outcomes_for_every_expected_client(
+        expected_client_ids=expected_client_ids,
+        controller_client_outcomes=controller_server.client_outcomes,
+    ):
+        all_client_outcomes_recorded_task.cancel()
+        await asyncio.gather(all_client_outcomes_recorded_task, return_exceptions=True)
+        return
+
+    await all_client_outcomes_recorded_task
+
+
+async def _wait_for_toy_clients(
+    toy_client_tasks: list[asyncio.Task[int]],
+) -> list[int | BaseException]:
+    return await asyncio.gather(*toy_client_tasks, return_exceptions=True)
+
+
+def _have_outcomes_for_every_expected_client(
+    *,
+    expected_client_ids: tuple[str, ...],
+    controller_client_outcomes: dict[str, ControllerClientOutcome],
+) -> bool:
+    return all(client_id in controller_client_outcomes for client_id in expected_client_ids)
+
+
+def _result_client_outcome(
+    *,
+    client_id: str,
+    controller_client_outcome: ControllerClientOutcome | None,
+    expected_bundle: Bundle,
+) -> ClientOutcome:
+    if controller_client_outcome is None:
+        return ClientOutcome(
+            client_id=client_id,
+            client_status=ClientStatus.TIMED_OUT,
+            bundle_id=expected_bundle.bundle_id,
+            error_detail=TIMED_OUT_ERROR_DETAIL,
+        )
+
+    return ClientOutcome(
+        client_id=client_id,
+        client_status=ClientStatus(controller_client_outcome.client_status),
+        bundle_id=expected_bundle.bundle_id,
+        error_detail=controller_client_outcome.error_detail,
+        reported_bundle=controller_client_outcome.reported_bundle,
+    )
 
 
 def _result_file_payload(
@@ -192,16 +272,20 @@ def _result_file_payload(
         "finished_at": finished_at,
         "expected_bundle": expected_bundle,
         "invocation_error": invocation_error,
-        "clients": [
-            {
-                "client_id": outcome.client_id,
-                "client_status": outcome.client_status,
-                "bundle_id": outcome.bundle_id,
-                "error_detail": outcome.error_detail,
-            }
-            for outcome in client_outcomes
-        ],
+        "clients": [_client_outcome_payload(outcome) for outcome in client_outcomes],
     }
+
+
+def _client_outcome_payload(outcome: ClientOutcome) -> ClientOutcomePayload:
+    payload: ClientOutcomePayload = {
+        "client_id": outcome.client_id,
+        "client_status": outcome.client_status,
+        "bundle_id": outcome.bundle_id,
+        "error_detail": outcome.error_detail,
+    }
+    if outcome.reported_bundle is not None:
+        payload["reported_bundle"] = outcome.reported_bundle.to_payload()
+    return payload
 
 
 def _write_failed_invocation_result(
@@ -274,33 +358,6 @@ def _derive_invocation_status(client_outcomes: list[ClientOutcome]) -> Invocatio
     )
 
 
-def _client_result(
-    *,
-    client_id: str,
-    accepted_client_ids: frozenset[str],
-    expected_bundle: Bundle,
-    toy_client_result: ToyClientResult,
-) -> ClientOutcome:
-    if (
-        toy_client_result.client_status == ClientStatus.SUCCESS
-        and client_id not in accepted_client_ids
-    ):
-        return ClientOutcome(
-            client_id=client_id,
-            client_status=ClientStatus.TIMED_OUT,
-            bundle_id=expected_bundle.bundle_id,
-            error_detail=TIMED_OUT_ERROR_DETAIL,
-        )
-
-    del expected_bundle
-    return ClientOutcome(
-        client_id=client_id,
-        client_status=toy_client_result.client_status,
-        bundle_id=toy_client_result.bundle_id,
-        error_detail=toy_client_result.error_detail,
-    )
-
-
 def _toy_client_environment(
     *,
     invocation_instance: int,
@@ -364,29 +421,6 @@ async def fetch_expected_bundle_from_update_server(
         bundle_id=manifest_bundle_id,
         byte_count=byte_count,
         checksum=checksum,
-    )
-
-
-def _client_outcome(
-    *,
-    client_id: str,
-    accepted_client_ids: frozenset[str],
-    expected_bundle: Bundle,
-    toy_client_result: ToyClientResult,
-) -> ClientOutcome:
-    """Build the client outcome for one invocation client.
-
-    :param client_id: Stable expected client identifier.
-    :param accepted_client_ids: Client IDs with accepted Verified Receipts.
-    :param expected_bundle: Bundle metadata expected during the invocation.
-    :param toy_client_result: Terminal outcome returned by the toy client workload.
-    :returns: Recorded client outcome.
-    """
-    return _client_result(
-        client_id=client_id,
-        accepted_client_ids=accepted_client_ids,
-        expected_bundle=expected_bundle,
-        toy_client_result=toy_client_result,
     )
 
 

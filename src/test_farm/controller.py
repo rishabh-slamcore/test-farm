@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from test_farm.models import Bundle
+from test_farm.models import Bundle, ClientStatus, Receipt
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,17 @@ class ControllerResponse:
 
     status_code: int
     body: dict[str, object]
+
+
+@dataclass(frozen=True)
+class ClientOutcome:
+    """Controller-owned per-client outcome for one invocation."""
+
+    client_id: str
+    client_status: ClientStatus
+    bundle_id: str
+    error_detail: str | None
+    reported_bundle: Bundle | None = None
 
 
 class ControllerState:
@@ -36,8 +47,8 @@ class ControllerState:
             _client_id(index) for index in range(1, client_count + 1)
         )
         self._expected_bundle = expected_bundle
-        self._accepted_client_ids: set[str] = set()
-        self._all_receipts_event = asyncio.Event()
+        self._client_outcomes: dict[str, ClientOutcome] = {}
+        self._all_client_outcomes_event = asyncio.Event()
         self._receipt_channel_open = True
         self._lock = asyncio.Lock()
 
@@ -48,10 +59,10 @@ class ControllerState:
         return self._expected_client_ids
 
     @property
-    def accepted_client_ids(self) -> frozenset[str]:
-        """Return Client IDs with an accepted Verified Receipt."""
+    def client_outcomes(self) -> dict[str, ClientOutcome]:
+        """Return controller-owned client outcomes keyed by Client ID."""
 
-        return frozenset(self._accepted_client_ids)
+        return dict(self._client_outcomes)
 
     async def handle_receipt(
         self,
@@ -78,8 +89,8 @@ class ControllerState:
                     },
                 )
 
-        payload = _parse_receipt_payload(body)
-        if payload is None:
+        posted_receipt = _parse_receipt_payload(body)
+        if posted_receipt is None:
             return ControllerResponse(
                 status_code=400,
                 body={"status": "rejected", "detail": "Receipt body must be a JSON object."},
@@ -88,13 +99,17 @@ class ControllerState:
         mismatch_detail = self._mismatch_detail(
             route_invocation_instance=route_invocation_instance,
             route_client_id=route_client_id,
-            receipt_bundle=payload,
         )
         if mismatch_detail is not None:
             return ControllerResponse(
                 status_code=409,
                 body={"status": "rejected", "detail": mismatch_detail},
             )
+
+        latest_outcome = self._normalize_outcome(
+            route_client_id=route_client_id,
+            posted_receipt=posted_receipt,
+        )
 
         async with self._lock:
             if not self._receipt_channel_open:
@@ -105,30 +120,31 @@ class ControllerState:
                         "detail": "Receipt channel is closed for this invocation.",
                     },
                 )
-            if route_client_id in self._accepted_client_ids:
-                return ControllerResponse(
-                    status_code=409,
-                    body={
-                        "status": "rejected",
-                        "detail": "Receipt client_id already reported a valid receipt.",
-                    },
-                )
-            self._accepted_client_ids.add(route_client_id)
-            if len(self._accepted_client_ids) == len(self._expected_client_ids):
+
+            existing_outcome = self._client_outcomes.get(route_client_id)
+            if (
+                existing_outcome is None
+                or existing_outcome.client_status != ClientStatus.SUCCESS
+            ):
+                self._client_outcomes[route_client_id] = latest_outcome
+
+            if len(self._client_outcomes) == len(self._expected_client_ids):
                 self._receipt_channel_open = False
-                self._all_receipts_event.set()
+                self._all_client_outcomes_event.set()
 
         return ControllerResponse(status_code=202, body={"status": "accepted"})
 
-    async def wait_for_expected_receipts(self, timeout_seconds: int) -> bool:
-        """Wait for every expected valid receipt for this invocation.
+    async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
+        """Wait for every expected client outcome for this invocation.
 
         :param timeout_seconds: Receipt wait timeout.
-        :returns: ``True`` when every expected receipt is accepted, else ``False``.
+        :returns: ``True`` when every expected outcome is recorded, else ``False``.
         """
 
         try:
-            await asyncio.wait_for(self._all_receipts_event.wait(), timeout=timeout_seconds)
+            await asyncio.wait_for(
+                self._all_client_outcomes_event.wait(), timeout=timeout_seconds
+            )
         except TimeoutError:
             async with self._lock:
                 self._receipt_channel_open = False
@@ -141,7 +157,6 @@ class ControllerState:
         *,
         route_invocation_instance: int,
         route_client_id: str,
-        receipt_bundle: Bundle,
     ) -> str | None:
         if route_invocation_instance != self._invocation_instance:
             return "Receipt invocation_instance did not match the current invocation."
@@ -149,16 +164,42 @@ class ControllerState:
         if route_client_id not in self._expected_client_ids:
             return "Receipt client_id did not match an expected client."
 
-        if receipt_bundle.bundle_id != self._expected_bundle.bundle_id:
-            return "Receipt bundle_id did not match the expected bundle."
-
-        if receipt_bundle.byte_count != self._expected_bundle.byte_count:
-            return "Receipt byte_count did not match the expected bundle."
-
-        if receipt_bundle.checksum != self._expected_bundle.checksum:
-            return "Receipt checksum did not match the expected bundle."
-
         return None
+
+    def _normalize_outcome(
+        self, *, route_client_id: str, posted_receipt: Receipt
+    ) -> ClientOutcome:
+        if posted_receipt.client_status == "download_failed":
+            return ClientOutcome(
+                client_id=route_client_id,
+                client_status=ClientStatus.DOWNLOAD_FAILED,
+                bundle_id=self._expected_bundle.bundle_id,
+                error_detail=posted_receipt.error_detail,
+            )
+
+        reported_bundle = posted_receipt.reported_bundle
+        if reported_bundle is None:
+            raise AssertionError("Success receipt must include reported bundle metadata.")
+
+        mismatch_detail = _bundle_mismatch_detail(
+            expected_bundle=self._expected_bundle,
+            reported_bundle=reported_bundle,
+        )
+        if mismatch_detail is None:
+            return ClientOutcome(
+                client_id=route_client_id,
+                client_status=ClientStatus.SUCCESS,
+                bundle_id=self._expected_bundle.bundle_id,
+                error_detail=None,
+            )
+
+        return ClientOutcome(
+            client_id=route_client_id,
+            client_status=ClientStatus.CHECKSUM_MISMATCH,
+            bundle_id=self._expected_bundle.bundle_id,
+            error_detail=mismatch_detail,
+            reported_bundle=reported_bundle,
+        )
 
 
 def create_controller_app(state: ControllerState) -> FastAPI:
@@ -223,15 +264,15 @@ class ControllerServer:
         return self._state.expected_client_ids
 
     @property
-    def accepted_client_ids(self) -> frozenset[str]:
-        """Return Client IDs with an accepted Verified Receipt."""
+    def client_outcomes(self) -> dict[str, ClientOutcome]:
+        """Return controller-owned client outcomes keyed by Client ID."""
 
-        return self._state.accepted_client_ids
+        return self._state.client_outcomes
 
-    async def wait_for_expected_receipts(self, timeout_seconds: int) -> bool:
-        """Wait for every expected valid receipt in the wrapped state."""
+    async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
+        """Wait for every expected client outcome in the wrapped state."""
 
-        return await self._state.wait_for_expected_receipts(timeout_seconds)
+        return await self._state.wait_for_client_outcomes(timeout_seconds)
 
     async def _serve(self) -> None:
         await self._server.serve()
@@ -261,7 +302,7 @@ def start_controller_server(
     return ControllerServer(bind_address=bind_address, state=state)
 
 
-def _parse_receipt_payload(body: bytes | None) -> Bundle | None:
+def _parse_receipt_payload(body: bytes | None) -> Receipt | None:
     if body is None:
         return None
 
@@ -273,9 +314,43 @@ def _parse_receipt_payload(body: bytes | None) -> Bundle | None:
     if not isinstance(parsed_body, dict):
         return None
 
-    bundle_id = parsed_body.get("bundle_id")
-    byte_count = parsed_body.get("byte_count")
-    checksum = parsed_body.get("checksum")
+    client_status = parsed_body.get("client_status")
+    reported_bundle_payload = parsed_body.get("reported_bundle")
+    error_detail = parsed_body.get("error_detail")
+
+    if client_status == "success":
+        if error_detail is not None:
+            return None
+        reported_bundle = _parse_bundle_payload(reported_bundle_payload)
+        if reported_bundle is None:
+            return None
+        return Receipt(
+            client_status="success",
+            reported_bundle=reported_bundle,
+            error_detail=None,
+        )
+
+    if client_status == "download_failed":
+        if not isinstance(error_detail, str):
+            return None
+        if reported_bundle_payload is not None:
+            return None
+        return Receipt(
+            client_status="download_failed",
+            reported_bundle=None,
+            error_detail=error_detail,
+        )
+
+    return None
+
+
+def _parse_bundle_payload(payload: object) -> Bundle | None:
+    if not isinstance(payload, dict):
+        return None
+
+    bundle_id = payload.get("bundle_id")
+    byte_count = payload.get("byte_count")
+    checksum = payload.get("checksum")
 
     if not isinstance(bundle_id, str):
         return None
@@ -287,6 +362,19 @@ def _parse_receipt_payload(body: bytes | None) -> Bundle | None:
         return None
 
     return Bundle(bundle_id=bundle_id, byte_count=byte_count, checksum=checksum)
+
+
+def _bundle_mismatch_detail(*, expected_bundle: Bundle, reported_bundle: Bundle) -> str | None:
+    if reported_bundle.bundle_id != expected_bundle.bundle_id:
+        return "Receipt bundle_id did not match the expected bundle."
+
+    if reported_bundle.byte_count != expected_bundle.byte_count:
+        return "Receipt byte_count did not match the expected bundle."
+
+    if reported_bundle.checksum != expected_bundle.checksum:
+        return "Receipt checksum did not match the expected bundle."
+
+    return None
 
 
 def _parse_bind_address(bind_address: str) -> tuple[str, int]:
