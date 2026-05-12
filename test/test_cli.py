@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from test_farm.cli import app
 from test_farm.controller import ClientOutcome as ControllerClientOutcome
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.runtime.preparation import RuntimePreparationError, RuntimePreparationResult
 
 
 @pytest.mark.parametrize(
@@ -46,6 +47,82 @@ def test_run_exits_with_code_2_for_invalid_scenario_files(
     assert expected_error in result.stderr
     assert str(scenario_file) in result.stderr
     assert not (tmp_path / "results").exists()
+
+
+def test_prepare_runtime_reports_when_image_is_already_prepared(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_force_values: list[bool] = []
+
+    def _prepare_toy_client_runtime(*, force_rebuild: bool) -> RuntimePreparationResult:
+        observed_force_values.append(force_rebuild)
+        return RuntimePreparationResult(
+            image_tag="test-farm/toy-client-runtime:latest",
+            created=False,
+        )
+
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_toy_client_runtime",
+        _prepare_toy_client_runtime,
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["prepare-runtime"])
+
+    assert result.exit_code == 0
+    assert observed_force_values == [False]
+    assert (
+        result.output
+        == "Baseline toy-client runtime image test-farm/toy-client-runtime:latest already exists. "
+        "Freshness is not checked; rerun with --force to rebuild it.\n"
+    )
+
+
+def test_prepare_runtime_exits_with_code_1_when_runtime_preparation_fails(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _raise_error(*, force_rebuild: bool) -> RuntimePreparationResult:
+        del force_rebuild
+        raise RuntimePreparationError(
+            "Docker CLI is required to prepare the toy-client runtime."
+        )
+
+    monkeypatch.setattr("test_farm.cli.prepare_toy_client_runtime", _raise_error)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["prepare-runtime"])
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == "Docker CLI is required to prepare the toy-client runtime.\n"
+
+
+def test_prepare_runtime_rebuilds_when_forced(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_force_values: list[bool] = []
+
+    def _prepare_toy_client_runtime(*, force_rebuild: bool) -> RuntimePreparationResult:
+        observed_force_values.append(force_rebuild)
+        return RuntimePreparationResult(
+            image_tag="test-farm/toy-client-runtime:latest",
+            created=True,
+        )
+
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_toy_client_runtime",
+        _prepare_toy_client_runtime,
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["prepare-runtime", "--force"])
+
+    assert result.exit_code == 0
+    assert observed_force_values == [True]
+    assert (
+        result.output
+        == "Rebuilt baseline toy-client runtime image test-farm/toy-client-runtime:latest.\n"
+    )
 
 
 def test_run_writes_timed_out_result_file_for_one_client(

@@ -20,10 +20,20 @@ uv sync --dev
 uv run pre-commit install
 ```
 
-Run the CLI placeholder:
+Prepare the baseline toy-client runtime image:
 
 ```bash
-uv run test-farm run
+uv run test-farm prepare-runtime
+```
+
+This default check only verifies that the prepared image tag already exists.
+It does not verify freshness against the current source tree.
+Use `uv run test-farm prepare-runtime --force` to rebuild explicitly.
+
+Run the baseline invocation:
+
+```bash
+uv run test-farm run <scenario.yaml> --controller-bind-address <host:port>
 ```
 
 Run the local quality gates:
