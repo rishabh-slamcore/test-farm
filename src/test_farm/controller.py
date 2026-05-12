@@ -134,10 +134,10 @@ class ControllerState:
 
         return ControllerResponse(status_code=202, body={"status": "accepted"})
 
-    async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
+    async def wait_for_client_outcomes(self, timeout_seconds: float) -> bool:
         """Wait for every expected client outcome for this invocation.
 
-        :param timeout_seconds: Receipt wait timeout.
+        :param timeout_seconds: Receipt wait timeout in seconds.
         :returns: ``True`` when every expected outcome is recorded, else ``False``.
         """
 
@@ -269,7 +269,7 @@ class ControllerServer:
 
         return self._state.client_outcomes
 
-    async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
+    async def wait_for_client_outcomes(self, timeout_seconds: float) -> bool:
         """Wait for every expected client outcome in the wrapped state."""
 
         return await self._state.wait_for_client_outcomes(timeout_seconds)

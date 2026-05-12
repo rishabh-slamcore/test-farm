@@ -169,6 +169,38 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
     ]
 
 
+def test_run_accepts_fractional_receipt_timeout_seconds(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    observed_timeouts: list[float] = []
+    _patch_controller_server(
+        monkeypatch,
+        test_client_success=True,
+        observed_timeouts=observed_timeouts,
+    )
+    _patch_update_server(monkeypatch, manifest_bundle=DEFAULT_BUNDLE)
+    _patch_toy_client(monkeypatch, client_status=ClientStatus.SUCCESS)
+
+    runner = CliRunner()
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text("client_count: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(scenario_file),
+            "--controller-bind-address",
+            "127.0.0.1:8080",
+            "--receipt-timeout-seconds",
+            "0.5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert observed_timeouts == [0.5]
+
+
 def test_run_starts_one_toy_client_per_expected_client_and_records_every_success(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -439,6 +471,7 @@ def _patch_controller_server(
     observed_bind_addresses: list[str] | None = None,
     observed_expected_bundles: list[Bundle] | None = None,
     observed_entries: list[str] | None = None,
+    observed_timeouts: list[float] | None = None,
     client_outcomes: dict[str, ControllerClientOutcome] | None = None,
 ) -> None:
     class FakeControllerServer:
@@ -481,8 +514,9 @@ def _patch_controller_server(
             del exc
             del traceback
 
-        async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
-            del timeout_seconds
+        async def wait_for_client_outcomes(self, timeout_seconds: float) -> bool:
+            if observed_timeouts is not None:
+                observed_timeouts.append(timeout_seconds)
             return len(self.client_outcomes) == len(self.expected_client_ids)
 
     monkeypatch.setattr(

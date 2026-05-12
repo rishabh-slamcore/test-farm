@@ -104,7 +104,7 @@ def test_execute_invocation_cancels_lingering_toy_clients_when_timeout_wins(
     toy_client_started = asyncio.Event()
     toy_client_cancelled = asyncio.Event()
 
-    async def _wait_for_client_outcomes(timeout_seconds: int) -> bool:
+    async def _wait_for_client_outcomes(timeout_seconds: float) -> bool:
         del timeout_seconds
         await toy_client_started.wait()
         return False
@@ -173,7 +173,7 @@ def test_execute_invocation_cancels_server_wait_task_when_clients_finish_first(
     server_wait_started = asyncio.Event()
     server_wait_cancelled = asyncio.Event()
 
-    async def _wait_for_client_outcomes(timeout_seconds: int) -> bool:
+    async def _wait_for_client_outcomes(timeout_seconds: float) -> bool:
         del timeout_seconds
         server_wait_started.set()
         try:
@@ -257,7 +257,9 @@ class _FakeUpdateServer:
 class _FakeControllerServer:
     expected_client_ids = ("client-001",)
 
-    def __init__(self, *, wait_for_client_outcomes: Callable[[int], Awaitable[bool]]) -> None:
+    def __init__(
+        self, *, wait_for_client_outcomes: Callable[[float], Awaitable[bool]]
+    ) -> None:
         self.client_outcomes: dict[str, ControllerClientOutcome] = {}
         self._wait_for_client_outcomes = wait_for_client_outcomes
 
@@ -269,7 +271,7 @@ class _FakeControllerServer:
         del exc
         del traceback
 
-    async def wait_for_client_outcomes(self, timeout_seconds: int) -> bool:
+    async def wait_for_client_outcomes(self, timeout_seconds: float) -> bool:
         return await self._wait_for_client_outcomes(timeout_seconds)
 
 

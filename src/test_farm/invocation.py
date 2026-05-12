@@ -76,7 +76,7 @@ async def execute_invocation(
     scenario_file: Path,
     client_count: int,
     controller_bind_address: str,
-    receipt_timeout_seconds: int,
+    receipt_timeout_seconds: float,
     results_dir: Path,
 ) -> tuple[Path, InvocationStatus]:
     """Execute the current invocation and write its Result File.
@@ -84,7 +84,7 @@ async def execute_invocation(
     :param scenario_file: Scenario file path supplied to the CLI.
     :param client_count: Number of clients requested by the scenario file.
     :param controller_bind_address: Bind address for the Controller Receipt Channel.
-    :param receipt_timeout_seconds: Receipt wait duration before timing out.
+    :param receipt_timeout_seconds: Receipt wait duration in seconds before timing out.
     :param results_dir: Directory where result files are written.
     :returns: Written result file path and its invocation status.
     """
