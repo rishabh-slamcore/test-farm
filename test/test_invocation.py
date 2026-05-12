@@ -9,6 +9,7 @@ from typing import Awaitable, Callable
 from pytest import MonkeyPatch
 
 from test_farm.controller import ClientOutcome as ControllerClientOutcome
+from test_farm.identifiers import expected_client_ids
 from test_farm.invocation import execute_invocation
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
 
@@ -255,12 +256,15 @@ class _FakeUpdateServer:
 
 
 class _FakeControllerServer:
-    expected_client_ids = ("client-001",)
-
     def __init__(
-        self, *, wait_for_client_outcomes: Callable[[float], Awaitable[bool]]
+        self,
+        *,
+        wait_for_client_outcomes: Callable[[float], Awaitable[bool]],
+        expected_client_ids: tuple[str, ...] = expected_client_ids(1),
+        client_outcomes: dict[str, ControllerClientOutcome] | None = None,
     ) -> None:
-        self.client_outcomes: dict[str, ControllerClientOutcome] = {}
+        self.expected_client_ids = expected_client_ids
+        self.client_outcomes = {} if client_outcomes is None else client_outcomes
         self._wait_for_client_outcomes = wait_for_client_outcomes
 
     async def __aenter__(self) -> "_FakeControllerServer":

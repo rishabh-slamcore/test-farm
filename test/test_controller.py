@@ -3,13 +3,14 @@
 from fastapi.testclient import TestClient
 
 from test_farm.controller import ControllerState, create_controller_app
+from test_farm.identifiers import expected_client_ids
 from test_farm.models import DEFAULT_BUNDLE, ClientStatus
 
 
 def test_controller_reports_health_and_accepts_one_valid_receipt() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=1,
+        expected_client_ids=expected_client_ids(1),
         expected_bundle=DEFAULT_BUNDLE,
     )
     with TestClient(create_controller_app(state)) as client:
@@ -37,7 +38,7 @@ def test_controller_reports_health_and_accepts_one_valid_receipt() -> None:
 def test_controller_accepts_mismatched_success_receipt_and_records_checksum_mismatch() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=1,
+        expected_client_ids=expected_client_ids(1),
         expected_bundle=DEFAULT_BUNDLE,
     )
     with TestClient(create_controller_app(state)) as client:
@@ -66,7 +67,7 @@ def test_controller_accepts_mismatched_success_receipt_and_records_checksum_mism
 def test_controller_accepts_download_failed_receipt_and_records_client_outcome() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=1,
+        expected_client_ids=expected_client_ids(1),
         expected_bundle=DEFAULT_BUNDLE,
     )
 
@@ -89,7 +90,7 @@ def test_controller_accepts_download_failed_receipt_and_records_client_outcome()
 def test_controller_rejects_malformed_receipt_without_recording_client_outcome() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=1,
+        expected_client_ids=expected_client_ids(1),
         expected_bundle=DEFAULT_BUNDLE,
     )
 
@@ -110,7 +111,7 @@ def test_controller_rejects_malformed_receipt_without_recording_client_outcome()
 def test_controller_latest_receipt_wins_until_timeout_but_success_is_sticky() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=2,
+        expected_client_ids=expected_client_ids(2),
         expected_bundle=DEFAULT_BUNDLE,
     )
 
@@ -144,7 +145,7 @@ def test_controller_latest_receipt_wins_until_timeout_but_success_is_sticky() ->
 def test_controller_rejects_late_receipt_after_timeout() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=1,
+        expected_client_ids=expected_client_ids(1),
         expected_bundle=DEFAULT_BUNDLE,
     )
     state._receipt_channel_open = False
@@ -165,7 +166,7 @@ def test_controller_rejects_late_receipt_after_timeout() -> None:
 def test_controller_keeps_receipt_channel_open_until_every_expected_client_reports() -> None:
     state = ControllerState(
         invocation_instance=1,
-        client_count=2,
+        expected_client_ids=expected_client_ids(2),
         expected_bundle=DEFAULT_BUNDLE,
     )
 

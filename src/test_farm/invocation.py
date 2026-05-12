@@ -12,6 +12,8 @@ import httpx
 
 from test_farm.controller import ClientOutcome as ControllerClientOutcome
 from test_farm.controller import ControllerServer, start_controller_server
+from test_farm.identifiers import expected_client_ids as build_expected_client_ids
+from test_farm.identifiers import invocation_directory_name
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
 from test_farm.subjects.toy_client import (
     BUNDLE_ID_ENV,
@@ -24,6 +26,7 @@ from test_farm.subjects.toy_client import (
 from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
+INVOCATION_DIRECTORY_NAME_PATTERN = re.compile(r"(\d+)$")
 TIMED_OUT_ERROR_DETAIL = "No receipt received before timeout."
 UPDATE_SERVER_BIND_ADDRESS = "127.0.0.1:8081"
 
@@ -114,10 +117,11 @@ async def execute_invocation(
             )
         # Let expected_bundle be fetched here instead of controller server. Removes
         # unneccessary responbility on controller server.
+        expected_client_ids = build_expected_client_ids(client_count)
         async with start_controller_server(
             bind_address=controller_bind_address,
             invocation_instance=invocation_instance,
-            client_count=client_count,
+            expected_client_ids=expected_client_ids,
             expected_bundle=expected_bundle,
         ) as controller_server:
             toy_client_tasks = [
@@ -132,7 +136,7 @@ async def execute_invocation(
                         )
                     )
                 )
-                for client_id in controller_server.expected_client_ids
+                for client_id in expected_client_ids
             ]
             all_toy_clients_done_task = asyncio.create_task(
                 _wait_for_toy_clients(toy_client_tasks)
@@ -144,7 +148,7 @@ async def execute_invocation(
                 toy_client_tasks=toy_client_tasks,
                 all_toy_clients_done_task=all_toy_clients_done_task,
                 all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
-                expected_client_ids=controller_server.expected_client_ids,
+                expected_client_ids=expected_client_ids,
                 controller_server=controller_server,
             )
     finished_at = _utc_now()
@@ -154,7 +158,7 @@ async def execute_invocation(
             controller_client_outcome=controller_server.client_outcomes.get(client_id),
             expected_bundle=expected_bundle,
         )
-        for client_id in controller_server.expected_client_ids
+        for client_id in expected_client_ids
     ]
     invocation_status = _derive_invocation_status(client_outcomes)
     result_file = _write_result_file(
@@ -318,7 +322,9 @@ def _write_result_file(*, results_dir: Path, payload: ResultFilePayload) -> Path
     """Persist one invocation result payload to disk."""
 
     results_dir.mkdir(parents=True, exist_ok=True)
-    result_file = results_dir / f"result_{payload['invocation_instance']}.json"
+    invocation_dir = results_dir / invocation_directory_name(payload["invocation_instance"])
+    invocation_dir.mkdir(parents=True, exist_ok=True)
+    result_file = invocation_dir / "result.json"
     result_file.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
     return result_file
 
@@ -336,10 +342,19 @@ def allocate_invocation_instance(results_dir: Path) -> int:
         return 1
 
     for result_file in results_dir.iterdir():
-        match = RESULT_FILE_NAME_PATTERN.fullmatch(result_file.name)
-        if match is None:
+        if result_file.is_dir():
+            match = INVOCATION_DIRECTORY_NAME_PATTERN.fullmatch(result_file.name)
+            if match is None or not (result_file / "result.json").is_file():
+                continue
+            highest_invocation_instance = max(
+                highest_invocation_instance,
+                int(match.group(1)),
+            )
             continue
-        highest_invocation_instance = max(highest_invocation_instance, int(match.group(1)))
+
+        match = RESULT_FILE_NAME_PATTERN.fullmatch(result_file.name)
+        if match is not None:
+            highest_invocation_instance = max(highest_invocation_instance, int(match.group(1)))
 
     return highest_invocation_instance + 1
 

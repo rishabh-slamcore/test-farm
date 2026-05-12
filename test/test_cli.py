@@ -68,7 +68,7 @@ def test_run_writes_timed_out_result_file_for_one_client(
             "127.0.0.1:8080",
         ],
     )
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 1
@@ -102,7 +102,9 @@ def test_run_increments_invocation_instance_from_existing_result_files(
     results_dir = tmp_path / "results"
     scenario_file.write_text("client_count: 1\n", encoding="utf-8")
     results_dir.mkdir()
-    (results_dir / "result_2.json").write_text("{}\n", encoding="utf-8")
+    existing_invocation_dir = results_dir / "002"
+    existing_invocation_dir.mkdir()
+    (existing_invocation_dir / "result.json").write_text("{}\n", encoding="utf-8")
     (results_dir / "notes.txt").write_text("ignore me\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
@@ -117,7 +119,7 @@ def test_run_increments_invocation_instance_from_existing_result_files(
     )
 
     assert result.exit_code == 1
-    assert (results_dir / "result_3.json").exists()
+    assert (results_dir / "003" / "result.json").exists()
 
 
 def test_run_accepts_one_valid_receipt_and_writes_success_result(
@@ -150,7 +152,7 @@ def test_run_accepts_one_valid_receipt_and_writes_success_result(
         ],
     )
 
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert observed_bind_addresses == ["127.0.0.1:8080"]
@@ -229,7 +231,7 @@ def test_run_starts_one_toy_client_per_expected_client_and_records_every_success
         ],
     )
 
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 0
@@ -291,7 +293,7 @@ def test_run_fails_without_hiding_successful_clients_when_a_receipt_is_missing(
         ],
     )
 
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 1
@@ -346,7 +348,7 @@ def test_run_uses_update_server_manifest_bundle_for_controller_and_result_file(
         ],
     )
 
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 0
@@ -391,7 +393,7 @@ def test_run_writes_failed_result_file_when_expected_bundle_fetch_raises_error(
             "127.0.0.1:8080",
         ],
     )
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 1
@@ -449,7 +451,7 @@ def test_run_includes_reported_bundle_only_for_checksum_mismatch_outcomes(
         ],
     )
 
-    result_file = tmp_path / "results" / "result_1.json"
+    result_file = tmp_path / "results" / "001" / "result.json"
     payload = json.loads(result_file.read_text(encoding="utf-8"))
 
     assert result.exit_code == 1
@@ -480,7 +482,7 @@ def _patch_controller_server(
             *,
             bind_address: str,
             invocation_instance: int,
-            client_count: int,
+            expected_client_ids: tuple[str, ...],
             expected_bundle: Bundle,
         ) -> None:
             del invocation_instance
@@ -488,9 +490,7 @@ def _patch_controller_server(
                 observed_bind_addresses.append(bind_address)
             if observed_expected_bundles is not None:
                 observed_expected_bundles.append(expected_bundle)
-            self.expected_client_ids = tuple(
-                f"client-{index:03d}" for index in range(1, client_count + 1)
-            )
+            self.expected_client_ids = expected_client_ids
             if client_outcomes is not None:
                 self.client_outcomes = client_outcomes
             elif test_client_success:

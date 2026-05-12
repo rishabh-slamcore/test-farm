@@ -39,13 +39,11 @@ class ControllerState:
         self,
         *,
         invocation_instance: int,
-        client_count: int,
+        expected_client_ids: tuple[str, ...],
         expected_bundle: Bundle,
     ) -> None:
         self._invocation_instance = invocation_instance
-        self._expected_client_ids = tuple(
-            _client_id(index) for index in range(1, client_count + 1)
-        )
+        self._expected_client_ids = expected_client_ids
         self._expected_bundle = expected_bundle
         self._client_outcomes: dict[str, ClientOutcome] = {}
         self._all_client_outcomes_event = asyncio.Event()
@@ -289,14 +287,14 @@ def start_controller_server(
     *,
     bind_address: str,
     invocation_instance: int,
-    client_count: int,
+    expected_client_ids: tuple[str, ...],
     expected_bundle: Bundle,
 ) -> ControllerServer:
     """Create the Controller server for one invocation's expected client receipts."""
 
     state = ControllerState(
         invocation_instance=invocation_instance,
-        client_count=client_count,
+        expected_client_ids=expected_client_ids,
         expected_bundle=expected_bundle,
     )
     return ControllerServer(bind_address=bind_address, state=state)
@@ -395,9 +393,3 @@ def _parse_bind_address(bind_address: str) -> tuple[str, int]:
         )
 
     return host, port
-
-
-def _client_id(index: int) -> str:
-    """Create the stable client identifier for one client index."""
-
-    return f"client-{index:03d}"

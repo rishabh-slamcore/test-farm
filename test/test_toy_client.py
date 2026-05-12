@@ -9,6 +9,7 @@ import httpx
 from pytest import MonkeyPatch
 
 from test_farm.controller import ClientOutcome, start_controller_server
+from test_farm.identifiers import expected_client_ids
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
 from test_farm.subjects.toy_client import run_toy_client
 from test_farm.subjects.update_server import start_update_server
@@ -102,7 +103,7 @@ async def _run_successful_client() -> tuple[int, dict[str, ClientOutcome]]:
         async with start_controller_server(
             bind_address=controller_bind_address,
             invocation_instance=7,
-            client_count=1,
+            expected_client_ids=expected_client_ids(1),
             expected_bundle=DEFAULT_BUNDLE,
         ) as controller_server:
             exit_code = await run_toy_client(
