@@ -26,6 +26,7 @@ from test_farm.runtime.networking import (
     parse_reachable_service_endpoint,
     service_url,
 )
+from test_farm.scenario import Scenario
 from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
@@ -78,19 +79,15 @@ class ResultFilePayload(TypedDict):
 
 
 async def execute_invocation(
-    scenario_file: Path,
-    client_count: int,
+    scenario: Scenario,
     controller_bind_address: str,
-    receipt_timeout_seconds: float,
     results_dir: Path,
     invocation_runner: InvocationRunner | None = None,
 ) -> tuple[Path, InvocationStatus]:
     """Execute the current invocation and write its Result File.
 
-    :param scenario_file: Scenario file path supplied to the CLI.
-    :param client_count: Number of clients requested by the scenario file.
+    :param scenario: Parsed scenario model for this invocation.
     :param controller_bind_address: Bind address for the Controller Receipt Channel.
-    :param receipt_timeout_seconds: Receipt wait duration in seconds before timing out.
     :param results_dir: Directory where result files are written.
     :returns: Written result file path and its invocation status.
     """
@@ -119,7 +116,7 @@ async def execute_invocation(
                 _write_failed_invocation_result(
                     results_dir=results_dir,
                     invocation_instance=invocation_instance,
-                    scenario_file=scenario_file,
+                    scenario_file=scenario.scenario_file,
                     started_at=started_at,
                     invocation_error={
                         "stage": "manifest_fetch",
@@ -129,7 +126,7 @@ async def execute_invocation(
                 "failed",
             )
 
-        expected_client_ids = build_expected_client_ids(client_count)
+        expected_client_ids = build_expected_client_ids(scenario.client_count)
 
         async with start_controller_server(
             bind_address=normalized_controller_bind_address,
@@ -150,7 +147,7 @@ async def execute_invocation(
                     _write_failed_invocation_result(
                         results_dir=results_dir,
                         invocation_instance=invocation_instance,
-                        scenario_file=scenario_file,
+                        scenario_file=scenario.scenario_file,
                         started_at=started_at,
                         expected_bundle=expected_bundle.to_payload(),
                         invocation_error={
@@ -168,7 +165,9 @@ async def execute_invocation(
                     invocation_session.wait_for_subjects()
                 )
                 all_client_outcomes_recorded_task = asyncio.create_task(
-                    controller_server.wait_for_client_outcomes(receipt_timeout_seconds)
+                    controller_server.wait_for_client_outcomes(
+                        scenario.receipt_timeout_seconds
+                    )
                 )
                 await _wait_for_invocation_completion(
                     invocation_session=invocation_session,
@@ -192,7 +191,7 @@ async def execute_invocation(
         results_dir=results_dir,
         payload=_result_file_payload(
             invocation_instance=invocation_instance,
-            scenario_file=scenario_file,
+            scenario_file=scenario.scenario_file,
             invocation_status=invocation_status,
             started_at=started_at,
             finished_at=finished_at,

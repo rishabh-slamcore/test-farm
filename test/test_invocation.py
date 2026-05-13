@@ -19,6 +19,7 @@ from test_farm.runtime.invocation_protocol import (
     InvocationSession,
     RuntimeSetupError,
 )
+from test_farm.scenario import Scenario
 from test_farm.subjects.toy_client import CLIENT_ID_ENV
 
 
@@ -28,15 +29,12 @@ def test_execute_invocation_completes_two_client_baseline_with_real_subjects(
     bind_address_factory: Callable[[], str],
 ) -> None:
     """Verify baseline orchestration records one successful outcome per expected client."""
-    scenario_file = tmp_path / "baseline.yaml"
-    scenario_file.write_text("client_count: 2\n", encoding="utf-8")
+    scenario = _write_scenario_file(tmp_path, client_count=2)
 
     result_file, invocation_status = asyncio.run(
         execute_invocation(
-            scenario_file=scenario_file,
-            client_count=2,
+            scenario=scenario,
             controller_bind_address=bind_address_factory(),
-            receipt_timeout_seconds=2,
             results_dir=tmp_path / "results",
         )
     )
@@ -67,7 +65,7 @@ def test_execute_invocation_records_success_for_one_expected_client(
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(tmp_path, client_count=1)
     fake_controller_server = _FakeControllerServer(wait_for_client_outcomes=_return_true)
 
     _patch_fake_update_server(
@@ -79,8 +77,7 @@ def test_execute_invocation_records_success_for_one_expected_client(
     _patch_toy_client(monkeypatch, controller_server=fake_controller_server)
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
         results_dir=tmp_path / "results",
     )
@@ -100,14 +97,18 @@ def test_execute_invocation_records_success_for_one_expected_client(
     ]
 
 
-def test_execute_invocation_accepts_fractional_receipt_timeout_seconds(
+def test_execute_invocation_uses_fractional_receipt_timeout_seconds_from_scenario(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
     observed_timeouts: list[float] = []
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(
+        tmp_path,
+        client_count=1,
+        receipt_timeout_seconds=0.5,
+    )
     fake_controller_server = _FakeControllerServer(
         wait_for_client_outcomes=lambda timeout_seconds: _record_wait_timeout(
             observed_timeouts, timeout_seconds
@@ -129,10 +130,8 @@ def test_execute_invocation_accepts_fractional_receipt_timeout_seconds(
     _patch_toy_client(monkeypatch, controller_server=fake_controller_server)
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=0.5,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -149,7 +148,7 @@ def test_execute_invocation_records_multi_client_success_payload_and_launches_ea
     reachable_update_server_bind_address: str,
 ) -> None:
     observed_environments: list[dict[str, str]] = []
-    scenario_file = _write_scenario_file(tmp_path, client_count=2)
+    scenario = _write_scenario_file(tmp_path, client_count=2)
     fake_controller_server = _FakeControllerServer(
         wait_for_client_outcomes=_return_true,
         expected_client_ids=expected_client_ids(2),
@@ -168,10 +167,8 @@ def test_execute_invocation_records_multi_client_success_payload_and_launches_ea
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=2,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=2,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -204,7 +201,7 @@ def test_execute_invocation_preserves_successful_clients_when_receipts_are_missi
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=3)
+    scenario = _write_scenario_file(tmp_path, client_count=3)
     fake_controller_server = _FakeControllerServer(
         wait_for_client_outcomes=_return_false,
         expected_client_ids=expected_client_ids(3),
@@ -234,10 +231,8 @@ def test_execute_invocation_preserves_successful_clients_when_receipts_are_missi
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=3,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=2,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -280,7 +275,7 @@ def test_execute_invocation_uses_update_server_manifest_bundle_for_controller_an
         checksum="derived-from-update-server",
     )
     observed_expected_bundles: list[Bundle] = []
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(tmp_path, client_count=1)
     fake_controller_server = _FakeControllerServer(wait_for_client_outcomes=_return_true)
 
     _patch_fake_update_server(
@@ -300,10 +295,8 @@ def test_execute_invocation_uses_update_server_manifest_bundle_for_controller_an
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=2,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -329,7 +322,7 @@ def test_execute_invocation_writes_failed_result_file_when_expected_bundle_fetch
     reachable_update_server_bind_address: str,
 ) -> None:
     observed_controller_entries: list[str] = []
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(tmp_path, client_count=1)
     fake_controller_server = _FakeControllerServer(wait_for_client_outcomes=_return_true)
 
     _patch_fake_update_server(
@@ -339,8 +332,7 @@ def test_execute_invocation_writes_failed_result_file_when_expected_bundle_fetch
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
         results_dir=tmp_path / "results",
         invocation_runner=InProcessInvocationRunner(),
@@ -372,7 +364,7 @@ def test_execute_invocation_includes_reported_bundle_only_for_checksum_mismatch_
         byte_count=DEFAULT_BUNDLE.byte_count,
         checksum="mismatched-checksum",
     )
-    scenario_file = _write_scenario_file(tmp_path, client_count=2)
+    scenario = _write_scenario_file(tmp_path, client_count=2)
     fake_controller_server = _FakeControllerServer(
         wait_for_client_outcomes=_return_true,
         expected_client_ids=expected_client_ids(2),
@@ -399,10 +391,8 @@ def test_execute_invocation_includes_reported_bundle_only_for_checksum_mismatch_
     _patch_toy_client(monkeypatch, controller_server=fake_controller_server)
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=2,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=2,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -432,7 +422,11 @@ def test_execute_invocation_cancels_lingering_toy_clients_when_timeout_wins(
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(
+        tmp_path,
+        client_count=1,
+        receipt_timeout_seconds=0,
+    )
     toy_client_started = asyncio.Event()
     toy_client_cancelled = asyncio.Event()
 
@@ -463,10 +457,8 @@ def test_execute_invocation_cancels_lingering_toy_clients_when_timeout_wins(
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=0,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -489,7 +481,11 @@ def test_execute_invocation_cancels_server_wait_task_when_clients_finish_first(
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(
+        tmp_path,
+        client_count=1,
+        receipt_timeout_seconds=30,
+    )
     server_wait_started = asyncio.Event()
     server_wait_cancelled = asyncio.Event()
 
@@ -525,10 +521,8 @@ def test_execute_invocation_cancels_server_wait_task_when_clients_finish_first(
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=30,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -551,7 +545,7 @@ def test_execute_invocation_writes_top_level_runtime_setup_failure(
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(tmp_path, client_count=1)
 
     _patch_fake_update_server(
         monkeypatch,
@@ -581,8 +575,7 @@ def test_execute_invocation_writes_top_level_runtime_setup_failure(
             raise RuntimeSetupError("Prepared runtime image is missing.")
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
         results_dir=tmp_path / "results",
         invocation_runner=_SetupFailingRunner(),
@@ -605,7 +598,7 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=2)
+    scenario = _write_scenario_file(tmp_path, client_count=2)
     observed_wait_timeouts: list[float] = []
 
     _patch_fake_update_server(
@@ -659,10 +652,8 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
             return _StartupFailingSession()
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=2,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=2,
         results_dir=tmp_path / "results",
         invocation_runner=_PartialStartupRunner(),
     )
@@ -693,7 +684,11 @@ def test_execute_invocation_writes_timed_out_result_file_for_one_client(
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(
+        tmp_path,
+        client_count=1,
+        receipt_timeout_seconds=0,
+    )
     fake_controller_server = _FakeControllerServer(wait_for_client_outcomes=_return_false)
 
     _patch_fake_update_server(
@@ -709,10 +704,8 @@ def test_execute_invocation_writes_timed_out_result_file_for_one_client(
     )
 
     result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=0,
         results_dir=tmp_path / "results",
     )
     payload = _read_payload(result_file)
@@ -720,7 +713,7 @@ def test_execute_invocation_writes_timed_out_result_file_for_one_client(
     assert invocation_status == "failed"
     assert result_file.exists()
     assert payload["invocation_instance"] == 1
-    assert payload["scenario_file"] == str(scenario_file)
+    assert payload["scenario_file"] == str(scenario.scenario_file)
     assert payload["invocation_status"] == "failed"
     assert payload["expected_bundle"] == DEFAULT_BUNDLE.to_payload()
     assert payload["invocation_error"] is None
@@ -742,7 +735,11 @@ def test_execute_invocation_increments_invocation_instance_from_existing_result_
     reachable_bind_address: str,
     reachable_update_server_bind_address: str,
 ) -> None:
-    scenario_file = _write_scenario_file(tmp_path, client_count=1)
+    scenario = _write_scenario_file(
+        tmp_path,
+        client_count=1,
+        receipt_timeout_seconds=0,
+    )
     results_dir = tmp_path / "results"
     existing_invocation_dir = results_dir / "002"
     existing_invocation_dir.mkdir(parents=True)
@@ -763,10 +760,8 @@ def test_execute_invocation_increments_invocation_instance_from_existing_result_
     )
 
     _result_file, invocation_status = execute_invocation_sync(
-        scenario_file=scenario_file,
-        client_count=1,
+        scenario=scenario,
         controller_bind_address=reachable_bind_address,
-        receipt_timeout_seconds=0,
         results_dir=results_dir,
     )
 
@@ -776,29 +771,40 @@ def test_execute_invocation_increments_invocation_instance_from_existing_result_
 
 def execute_invocation_sync(
     *,
-    scenario_file: Path,
-    client_count: int,
+    scenario: Scenario,
     controller_bind_address: str,
     results_dir: Path,
-    receipt_timeout_seconds: float = 2,
     invocation_runner: InvocationRunner | None = None,
 ) -> tuple[Path, str]:
     return asyncio.run(
         execute_invocation(
-            scenario_file=scenario_file,
-            client_count=client_count,
+            scenario=scenario,
             controller_bind_address=controller_bind_address,
-            receipt_timeout_seconds=receipt_timeout_seconds,
             results_dir=results_dir,
             invocation_runner=invocation_runner,
         )
     )
 
 
-def _write_scenario_file(tmp_path: Path, *, client_count: int) -> Path:
+def _write_scenario_file(
+    tmp_path: Path,
+    *,
+    client_count: int,
+    receipt_timeout_seconds: float = 2,
+) -> Scenario:
     scenario_file = tmp_path / "baseline.yaml"
-    scenario_file.write_text(f"client_count: {client_count}\n", encoding="utf-8")
-    return scenario_file
+    scenario_file.write_text(
+        "client_count: "
+        f"{client_count}\n"
+        "receipt_timeout_seconds: "
+        f"{receipt_timeout_seconds}\n",
+        encoding="utf-8",
+    )
+    return Scenario(
+        scenario_file=scenario_file,
+        client_count=client_count,
+        receipt_timeout_seconds=float(receipt_timeout_seconds),
+    )
 
 
 def _read_payload(result_file: Path) -> dict[str, object]:

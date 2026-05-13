@@ -8,17 +8,35 @@ from typer.testing import CliRunner
 
 from test_farm.cli import app
 from test_farm.runtime.preparation import RuntimePreparationError, RuntimePreparationResult
+from test_farm.scenario import Scenario
 
 
 @pytest.mark.parametrize(
     ("scenario_contents", "expected_error"),
     [
         ("not: [valid yaml\n", "is not valid YAML"),
-        ("- client_count: 1\n", "must contain a mapping with only client_count"),
+        (
+            "- client_count: 1\n",
+            "must contain a mapping with only client_count and receipt_timeout_seconds",
+        ),
         ("{}\n", "is missing required field client_count"),
-        ("client_count: 1\nmode: baseline\n", "contains unknown fields: mode"),
-        ("client_count: 0\n", "must set client_count to a positive integer"),
-        ("client_count: true\n", "must set client_count to a positive integer"),
+        ("client_count: 1\n", "is missing required field receipt_timeout_seconds"),
+        (
+            "client_count: 1\nreceipt_timeout_seconds: 0\nmode: baseline\n",
+            "contains unknown fields: mode",
+        ),
+        (
+            "client_count: 0\nreceipt_timeout_seconds: 0\n",
+            "must set client_count to a positive integer",
+        ),
+        (
+            "client_count: true\nreceipt_timeout_seconds: 0\n",
+            "must set client_count to a positive integer",
+        ),
+        (
+            "client_count: 1\nreceipt_timeout_seconds: true\n",
+            "must set receipt_timeout_seconds to a non-negative number",
+        ),
     ],
 )
 def test_run_exits_with_code_2_for_invalid_scenario_files(
@@ -136,7 +154,10 @@ def test_run_exits_with_code_2_for_loopback_controller_bind_address(
     )
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
-    scenario_file.write_text("client_count: 1\n", encoding="utf-8")
+    scenario_file.write_text(
+        "client_count: 1\nreceipt_timeout_seconds: 0\n",
+        encoding="utf-8",
+    )
 
     result = runner.invoke(
         app,
@@ -170,7 +191,10 @@ def test_run_exits_with_code_2_for_unreachable_controller_bind_address(
     )
     runner = CliRunner()
     scenario_file = tmp_path / "baseline.yaml"
-    scenario_file.write_text("client_count: 1\n", encoding="utf-8")
+    scenario_file.write_text(
+        "client_count: 1\nreceipt_timeout_seconds: 0\n",
+        encoding="utf-8",
+    )
 
     result = runner.invoke(
         app,

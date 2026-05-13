@@ -24,7 +24,6 @@ def run(
         ..., dir_okay=False, readable=True, resolve_path=True
     ),
     controller_bind_address: str = typer.Option(..., "--controller-bind-address"),
-    receipt_timeout_seconds: float = typer.Option(0.0, "--receipt-timeout-seconds", min=0.0),
     results_dir: Path = typer.Option(
         Path("results"), "--results-dir", file_okay=False, resolve_path=True
     ),
@@ -45,10 +44,8 @@ def run(
 
     result_file, invocation_status = asyncio.run(
         execute_invocation(
-            scenario_file=scenario_file,
-            client_count=scenario.client_count,
+            scenario=scenario,
             controller_bind_address=controller_bind_address,
-            receipt_timeout_seconds=receipt_timeout_seconds,
             results_dir=results_dir,
         )
     )

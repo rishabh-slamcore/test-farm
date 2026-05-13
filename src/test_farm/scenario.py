@@ -8,14 +8,16 @@ import yaml  # type: ignore[import-untyped]
 
 
 class ScenarioFileError(ValueError):
-    """Raised when a scenario file does not match the supported M1 shape."""
+    """Raised when a scenario file does not match the supported baseline shape."""
 
 
 @dataclass(frozen=True)
 class Scenario:
-    """The supported M1 scenario contract."""
+    """The supported baseline scenario contract."""
 
+    scenario_file: Path
     client_count: int
+    receipt_timeout_seconds: float
 
 
 def load_scenario_file(path: Path) -> Scenario:
@@ -35,14 +37,20 @@ def load_scenario_file(path: Path) -> Scenario:
 
     if not isinstance(raw_data, dict):
         raise ScenarioFileError(
-            f"Scenario file {path} must contain a mapping with only client_count."
+            "Scenario file "
+            f"{path} must contain a mapping with only client_count and "
+            "receipt_timeout_seconds."
         )
 
-    return Scenario(client_count=_parse_client_count(path, raw_data))
+    return Scenario(
+        scenario_file=path,
+        client_count=_parse_client_count(path, raw_data),
+        receipt_timeout_seconds=_parse_receipt_timeout_seconds(path, raw_data),
+    )
 
 
 def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
-    """Validate the only supported scenario field.
+    """Validate the supported client-count field.
 
     :param path: Path to the scenario YAML file.
     :param raw_data: Parsed raw YAML mapping.
@@ -50,7 +58,7 @@ def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
     :raises ScenarioFileError: If the mapping shape is invalid.
     """
 
-    expected_fields = {"client_count"}
+    expected_fields = {"client_count", "receipt_timeout_seconds"}
     actual_fields = set(raw_data)
     missing_fields = expected_fields - actual_fields
     unknown_fields = actual_fields - expected_fields
@@ -78,3 +86,25 @@ def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
         )
 
     return cast(int, raw_client_count)
+
+
+def _parse_receipt_timeout_seconds(path: Path, raw_data: dict[str, Any]) -> float:
+    """Validate the supported receipt-timeout field.
+
+    :param path: Path to the scenario YAML file.
+    :param raw_data: Parsed raw YAML mapping.
+    :returns: Validated receipt timeout in seconds.
+    :raises ScenarioFileError: If the mapping shape is invalid.
+    """
+
+    raw_receipt_timeout_seconds = raw_data["receipt_timeout_seconds"]
+    if (
+        isinstance(raw_receipt_timeout_seconds, bool)
+        or not isinstance(raw_receipt_timeout_seconds, int | float)
+        or raw_receipt_timeout_seconds < 0
+    ):
+        raise ScenarioFileError(
+            f"Scenario file {path} must set receipt_timeout_seconds to a non-negative number."
+        )
+
+    return float(raw_receipt_timeout_seconds)
