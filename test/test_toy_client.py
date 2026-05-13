@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import socket
 from collections.abc import Callable
 
 import httpx
@@ -17,8 +16,10 @@ from test_farm.subjects.update_server import start_update_server
 HTTPX_ASYNC_CLIENT = httpx.AsyncClient
 
 
-def test_toy_client_downloads_bundle_and_posts_success_receipt() -> None:
-    exit_code, client_outcomes = asyncio.run(_run_successful_client())
+def test_toy_client_downloads_bundle_and_posts_success_receipt(
+    bind_address_factory: Callable[[], str],
+) -> None:
+    exit_code, client_outcomes = asyncio.run(_run_successful_client(bind_address_factory))
 
     assert exit_code == 0
     assert client_outcomes["client-001"].client_status == ClientStatus.SUCCESS
@@ -95,9 +96,11 @@ def test_toy_client_returns_non_zero_when_receipt_post_fails(
     assert exit_code == 2
 
 
-async def _run_successful_client() -> tuple[int, dict[str, ClientOutcome]]:
-    update_server_bind_address = _allocate_bind_address()
-    controller_bind_address = _allocate_bind_address()
+async def _run_successful_client(
+    bind_address_factory: Callable[[], str],
+) -> tuple[int, dict[str, ClientOutcome]]:
+    update_server_bind_address = bind_address_factory()
+    controller_bind_address = bind_address_factory()
 
     async with start_update_server(bind_address=update_server_bind_address) as update_server:
         async with start_controller_server(
@@ -121,14 +124,6 @@ async def _run_successful_client() -> tuple[int, dict[str, ClientOutcome]]:
 
     assert all_outcomes_recorded is True
     return exit_code, controller_server.client_outcomes
-
-
-def _allocate_bind_address() -> str:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind(("127.0.0.1", 0))
-        host, port = server_socket.getsockname()
-
-    return f"{host}:{port}"
 
 
 def _toy_client_environment() -> dict[str, str]:

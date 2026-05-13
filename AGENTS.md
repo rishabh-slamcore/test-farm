@@ -37,6 +37,10 @@ Agent note: in the Codex sandbox, if a `uv` command fails trying to create lock 
 
 Agent note: in the Codex sandbox,Do not rely on streamed pytest output. Run pytest with stdout/stderr redirected to /tmp/pytest.out and write the exit code to /tmp/pytest.exit. Then read both files in a separate command. If the exec wrapper does not return, check for pytest/python child processes and inspect the output file. Do not claim tests passed unless /tmp/pytest.exit contains 0. If you the tests are hung, try running the tests outside the sandbox, directly on the host.
 
+Agent note: always run `uv run pytest -k test_execute_invocation_completes_two_client_baseline_with_real_subjects` with elevated permissions outside the sandbox, because this test may need host-level socket binding.
+
+Agent note: when a new test is added that binds to sockets or otherwise requires host-level networking privileges, add that test command to this elevated-permissions note list in `AGENTS.md` so future runs are not attempted in the sandbox first.
+
 ## Python Best Practices
 
 All Python code **should try** to follow the standards defined in `docs/specs/best-practices.md`. Key requirements:

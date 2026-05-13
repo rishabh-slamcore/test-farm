@@ -10,6 +10,7 @@ class ClientStatus(StrEnum):
     """Terminal client outcomes shared across toy-client and invocation code."""
 
     TIMED_OUT = "timed_out"
+    STARTUP_FAILED = "startup_failed"
     SUCCESS = "success"
     DOWNLOAD_FAILED = "download_failed"
     CHECKSUM_MISMATCH = "checksum_mismatch"

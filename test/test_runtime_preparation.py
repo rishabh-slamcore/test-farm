@@ -14,16 +14,13 @@ from test_farm.runtime.preparation import (
 )
 
 
-def test_prepare_toy_client_runtime_skips_build_when_image_already_exists(
-    monkeypatch: MonkeyPatch,
-) -> None:
+@pytest.mark.usefixtures("docker_available_for_runtime_preparation")
+def test_prepare_toy_client_runtime_skips_build_when_image_already_exists() -> None:
     observed_calls: list[tuple[list[str], Path]] = []
 
     def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
         observed_calls.append((args, cwd))
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("test_farm.runtime.preparation.which", lambda name: f"/usr/bin/{name}")
 
     result = prepare_toy_client_runtime(command_runner=_command_runner)
 
@@ -37,9 +34,8 @@ def test_prepare_toy_client_runtime_skips_build_when_image_already_exists(
     ]
 
 
-def test_prepare_toy_client_runtime_builds_image_when_missing(
-    monkeypatch: MonkeyPatch,
-) -> None:
+@pytest.mark.usefixtures("docker_available_for_runtime_preparation")
+def test_prepare_toy_client_runtime_builds_image_when_missing() -> None:
     observed_calls: list[tuple[list[str], Path]] = []
 
     def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
@@ -47,8 +43,6 @@ def test_prepare_toy_client_runtime_builds_image_when_missing(
         if args[:3] == ["docker", "image", "inspect"]:
             return CompletedProcess(args=args, returncode=1, stdout="", stderr="missing")
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("test_farm.runtime.preparation.which", lambda name: f"/usr/bin/{name}")
 
     result = prepare_toy_client_runtime(command_runner=_command_runner)
 
@@ -74,16 +68,13 @@ def test_prepare_toy_client_runtime_builds_image_when_missing(
     ]
 
 
-def test_prepare_toy_client_runtime_rebuilds_when_forced(
-    monkeypatch: MonkeyPatch,
-) -> None:
+@pytest.mark.usefixtures("docker_available_for_runtime_preparation")
+def test_prepare_toy_client_runtime_rebuilds_when_forced() -> None:
     observed_calls: list[tuple[list[str], Path]] = []
 
     def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
         observed_calls.append((args, cwd))
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr("test_farm.runtime.preparation.which", lambda name: f"/usr/bin/{name}")
 
     result = prepare_toy_client_runtime(
         command_runner=_command_runner,

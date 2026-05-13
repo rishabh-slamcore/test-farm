@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from test_farm.invocation import execute_invocation
+from test_farm.runtime.networking import parse_reachable_service_endpoint
 from test_farm.runtime.preparation import RuntimePreparationError, prepare_toy_client_runtime
 from test_farm.scenario import ScenarioFileError, load_scenario_file
 
@@ -29,6 +30,12 @@ def run(
     ),
 ) -> None:
     """Run the current baseline invocation slice."""
+
+    try:
+        parse_reachable_service_endpoint(controller_bind_address)
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
 
     try:
         scenario = load_scenario_file(scenario_file)

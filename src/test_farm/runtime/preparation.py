@@ -1,22 +1,17 @@
 """Prepare runtime assets needed by test-farm invocations."""
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
-from subprocess import CompletedProcess, run
-from typing import Protocol
+from subprocess import CompletedProcess
+
+from test_farm.runtime.command_runner import CommandRunner
 
 PREPARED_TOY_CLIENT_IMAGE_TAG = "test-farm/toy-client-runtime:latest"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOY_CLIENT_RUNTIME_ASSETS_DIR = REPO_ROOT / "runtime" / "toy_client"
 TOY_CLIENT_RUNTIME_DOCKERFILE = TOY_CLIENT_RUNTIME_ASSETS_DIR / "Dockerfile"
-
-
-class CommandRunner(Protocol):
-    """Run one Docker command for runtime preparation."""
-
-    def __call__(self, args: list[str], *, cwd: Path) -> CompletedProcess[str]:
-        """Execute the given command in the provided working directory."""
 
 
 class RuntimePreparationError(RuntimeError):
@@ -83,7 +78,7 @@ def prepare_toy_client_runtime(
 
 
 def _default_command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
-    return run(
+    return subprocess.run(
         args,
         cwd=cwd,
         check=False,

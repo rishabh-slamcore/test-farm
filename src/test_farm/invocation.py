@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, Mapping, TypedDict, cast
 
 import httpx
 
@@ -15,20 +15,22 @@ from test_farm.controller import ControllerServer, start_controller_server
 from test_farm.identifiers import expected_client_ids as build_expected_client_ids
 from test_farm.identifiers import invocation_directory_name
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
-from test_farm.subjects.toy_client import (
-    BUNDLE_ID_ENV,
-    CLIENT_ID_ENV,
-    CONTROLLER_REPORTBACK_URL_ENV,
-    INVOCATION_INSTANCE_ENV,
-    UPDATE_SERVER_URL_ENV,
-    run_toy_client,
+from test_farm.runtime.invocation.factory import create_default_invocation_runner
+from test_farm.runtime.invocation_protocol import (
+    InvocationRunner,
+    InvocationSession,
+    RuntimeSetupError,
+)
+from test_farm.runtime.networking import (
+    derive_update_server_bind_address,
+    parse_reachable_service_endpoint,
+    service_url,
 )
 from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
 INVOCATION_DIRECTORY_NAME_PATTERN = re.compile(r"(\d+)$")
 TIMED_OUT_ERROR_DETAIL = "No receipt received before timeout."
-UPDATE_SERVER_BIND_ADDRESS = "127.0.0.1:8081"
 
 
 type InvocationStatus = Literal["success", "failed"]
@@ -81,6 +83,7 @@ async def execute_invocation(
     controller_bind_address: str,
     receipt_timeout_seconds: float,
     results_dir: Path,
+    invocation_runner: InvocationRunner | None = None,
 ) -> tuple[Path, InvocationStatus]:
     """Execute the current invocation and write its Result File.
 
@@ -92,10 +95,20 @@ async def execute_invocation(
     :returns: Written result file path and its invocation status.
     """
 
+    controller_endpoint = parse_reachable_service_endpoint(controller_bind_address)
+    normalized_controller_bind_address = (
+        f"{controller_endpoint.host}:{controller_endpoint.port}"
+    )
+    update_server_bind_address = derive_update_server_bind_address(
+        normalized_controller_bind_address
+    )
+    resolved_invocation_runner = (
+        create_default_invocation_runner() if invocation_runner is None else invocation_runner
+    )
     invocation_instance = allocate_invocation_instance(results_dir)
     started_at = _utc_now()
 
-    async with start_update_server(bind_address=UPDATE_SERVER_BIND_ADDRESS) as update_server:
+    async with start_update_server(bind_address=update_server_bind_address) as update_server:
         try:
             expected_bundle = await fetch_expected_bundle_from_update_server(
                 update_server_base_url=update_server.base_url,
@@ -115,48 +128,62 @@ async def execute_invocation(
                 ),
                 "failed",
             )
-        # Let expected_bundle be fetched here instead of controller server. Removes
-        # unneccessary responbility on controller server.
+
         expected_client_ids = build_expected_client_ids(client_count)
+
         async with start_controller_server(
-            bind_address=controller_bind_address,
+            bind_address=normalized_controller_bind_address,
             invocation_instance=invocation_instance,
             expected_client_ids=expected_client_ids,
             expected_bundle=expected_bundle,
         ) as controller_server:
-            toy_client_tasks = [
-                asyncio.create_task(
-                    run_toy_client(
-                        _toy_client_environment(
-                            invocation_instance=invocation_instance,
-                            client_id=client_id,
-                            update_server_base_url=update_server.base_url,
-                            controller_reportback_url=f"http://{controller_bind_address}",
-                            bundle_id=expected_bundle.bundle_id,
-                        )
-                    )
+            try:
+                invocation_session = resolved_invocation_runner.start_session(
+                    invocation_instance=invocation_instance,
+                    client_ids=expected_client_ids,
+                    controller_reportback_url=service_url(normalized_controller_bind_address),
+                    update_server_url=update_server.base_url,
+                    bundle_id=expected_bundle.bundle_id,
                 )
-                for client_id in expected_client_ids
-            ]
-            all_toy_clients_done_task = asyncio.create_task(
-                _wait_for_toy_clients(toy_client_tasks)
-            )
-            all_client_outcomes_recorded_task = asyncio.create_task(
-                controller_server.wait_for_client_outcomes(receipt_timeout_seconds)
-            )
-            await _wait_for_invocation_completion(
-                toy_client_tasks=toy_client_tasks,
-                all_toy_clients_done_task=all_toy_clients_done_task,
-                all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
-                expected_client_ids=expected_client_ids,
-                controller_server=controller_server,
-            )
+            except RuntimeSetupError as invocation_error:
+                return (
+                    _write_failed_invocation_result(
+                        results_dir=results_dir,
+                        invocation_instance=invocation_instance,
+                        scenario_file=scenario_file,
+                        started_at=started_at,
+                        expected_bundle=expected_bundle.to_payload(),
+                        invocation_error={
+                            "stage": "runtime_setup",
+                            "detail": str(invocation_error),
+                        },
+                    ),
+                    "failed",
+                )
+
+            if invocation_session.startup_failures:
+                await invocation_session.stop_remaining_subjects()
+            else:
+                all_subjects_done_task = asyncio.create_task(
+                    invocation_session.wait_for_subjects()
+                )
+                all_client_outcomes_recorded_task = asyncio.create_task(
+                    controller_server.wait_for_client_outcomes(receipt_timeout_seconds)
+                )
+                await _wait_for_invocation_completion(
+                    invocation_session=invocation_session,
+                    all_subjects_done_task=all_subjects_done_task,
+                    all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
+                    expected_client_ids=expected_client_ids,
+                    controller_server=controller_server,
+                )
     finished_at = _utc_now()
     client_outcomes = [
         _result_client_outcome(
             client_id=client_id,
             controller_client_outcome=controller_server.client_outcomes.get(client_id),
             expected_bundle=expected_bundle,
+            startup_failures=invocation_session.startup_failures,
         )
         for client_id in expected_client_ids
     ]
@@ -179,14 +206,14 @@ async def execute_invocation(
 
 async def _wait_for_invocation_completion(
     *,
-    toy_client_tasks: list[asyncio.Task[int]],
-    all_toy_clients_done_task: asyncio.Task[list[int | BaseException]],
+    invocation_session: InvocationSession,
+    all_subjects_done_task: asyncio.Task[None],
     all_client_outcomes_recorded_task: asyncio.Task[bool],
     expected_client_ids: tuple[str, ...],
     controller_server: ControllerServer,
 ) -> None:
     waitables: set[asyncio.Task[object]] = {
-        cast(asyncio.Task[object], all_toy_clients_done_task),
+        cast(asyncio.Task[object], all_subjects_done_task),
         cast(asyncio.Task[object], all_client_outcomes_recorded_task),
     }
     done, _pending = await asyncio.wait(
@@ -197,16 +224,14 @@ async def _wait_for_invocation_completion(
     if all_client_outcomes_recorded_task in done:
         all_client_outcomes_recorded = all_client_outcomes_recorded_task.result()
         if not all_client_outcomes_recorded:
-            for toy_client_task in toy_client_tasks:
-                toy_client_task.cancel()
-            await asyncio.gather(*toy_client_tasks, return_exceptions=True)
-            await all_toy_clients_done_task
+            await invocation_session.stop_remaining_subjects()
+            await all_subjects_done_task
             return
 
-        await all_toy_clients_done_task
+        await all_subjects_done_task
         return
 
-    await all_toy_clients_done_task
+    await all_subjects_done_task
     if _have_outcomes_for_every_expected_client(
         expected_client_ids=expected_client_ids,
         controller_client_outcomes=controller_server.client_outcomes,
@@ -216,12 +241,6 @@ async def _wait_for_invocation_completion(
         return
 
     await all_client_outcomes_recorded_task
-
-
-async def _wait_for_toy_clients(
-    toy_client_tasks: list[asyncio.Task[int]],
-) -> list[int | BaseException]:
-    return await asyncio.gather(*toy_client_tasks, return_exceptions=True)
 
 
 def _have_outcomes_for_every_expected_client(
@@ -237,7 +256,17 @@ def _result_client_outcome(
     client_id: str,
     controller_client_outcome: ControllerClientOutcome | None,
     expected_bundle: Bundle,
+    startup_failures: Mapping[str, str],
 ) -> ClientOutcome:
+    startup_failure = startup_failures.get(client_id)
+    if startup_failure is not None:
+        return ClientOutcome(
+            client_id=client_id,
+            client_status=ClientStatus.STARTUP_FAILED,
+            bundle_id=expected_bundle.bundle_id,
+            error_detail=startup_failure,
+        )
+
     if controller_client_outcome is None:
         return ClientOutcome(
             client_id=client_id,
@@ -371,23 +400,6 @@ def _derive_invocation_status(client_outcomes: list[ClientOutcome]) -> Invocatio
         if all(outcome.client_status == ClientStatus.SUCCESS for outcome in client_outcomes)
         else "failed"
     )
-
-
-def _toy_client_environment(
-    *,
-    invocation_instance: int,
-    client_id: str,
-    update_server_base_url: str,
-    controller_reportback_url: str,
-    bundle_id: str,
-) -> dict[str, str]:
-    return {
-        INVOCATION_INSTANCE_ENV: str(invocation_instance),
-        CLIENT_ID_ENV: client_id,
-        UPDATE_SERVER_URL_ENV: update_server_base_url,
-        CONTROLLER_REPORTBACK_URL_ENV: controller_reportback_url,
-        BUNDLE_ID_ENV: bundle_id,
-    }
 
 
 async def fetch_expected_bundle_from_update_server(
