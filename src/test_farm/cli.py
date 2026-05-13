@@ -24,6 +24,11 @@ def run(
         ..., dir_okay=False, readable=True, resolve_path=True
     ),
     controller_bind_address: str = typer.Option(..., "--controller-bind-address"),
+    keep_containers: bool = typer.Option(
+        False,
+        "--keep-containers",
+        help="Preserve stopped runtime artifacts for debugging instead of tearing them down.",
+    ),
     results_dir: Path = typer.Option(
         Path("results"), "--results-dir", file_okay=False, resolve_path=True
     ),
@@ -47,6 +52,7 @@ def run(
             scenario=scenario,
             controller_bind_address=controller_bind_address,
             results_dir=results_dir,
+            keep_containers=keep_containers,
         )
     )
     if invocation_status == "success":

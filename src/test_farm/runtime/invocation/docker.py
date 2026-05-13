@@ -4,7 +4,11 @@ from shutil import which
 from subprocess import CompletedProcess, run
 from typing import Mapping
 
-from test_farm.identifiers import invocation_directory_name
+from test_farm.identifiers import (
+    client_diagnostic_log_name,
+    runtime_container_name,
+    runtime_network_name,
+)
 from test_farm.runtime.command_runner import CommandRunner
 from test_farm.runtime.invocation_protocol import InvocationSession, RuntimeSetupError
 from test_farm.runtime.preparation import PREPARED_TOY_CLIENT_IMAGE_TAG, REPO_ROOT
@@ -57,9 +61,22 @@ class DockerInvocationRunner:
         started_client_ids: list[str] = []
         container_names_by_client_id: dict[str, str] = {}
         startup_failures: dict[str, str] = {}
+        network_name = runtime_network_name(invocation_instance)
+
+        network_create_result = self._command_runner(
+            ["docker", "network", "create", network_name],
+            cwd=self._repo_root,
+        )
+        if network_create_result.returncode != 0:
+            raise RuntimeSetupError(
+                _docker_error_detail(
+                    stderr=network_create_result.stderr,
+                    fallback=f"Docker failed to create runtime network {network_name}.",
+                )
+            )
 
         for client_id in client_ids:
-            container_name = _container_name(
+            container_name = runtime_container_name(
                 invocation_instance=invocation_instance,
                 client_id=client_id,
             )
@@ -68,9 +85,10 @@ class DockerInvocationRunner:
                     "docker",
                     "run",
                     "--detach",
-                    "--rm",
                     "--name",
                     container_name,
+                    "--network",
+                    network_name,
                     "--env",
                     f"{INVOCATION_INSTANCE_ENV}={invocation_instance}",
                     "--env",
@@ -101,6 +119,7 @@ class DockerInvocationRunner:
             started_client_ids=tuple(started_client_ids),
             container_names_by_client_id=container_names_by_client_id,
             startup_failures=startup_failures,
+            network_name=network_name,
         )
 
 
@@ -115,12 +134,16 @@ class DockerInvocationSession:
         started_client_ids: tuple[str, ...],
         container_names_by_client_id: dict[str, str],
         startup_failures: dict[str, str],
+        network_name: str,
     ) -> None:
         self._command_runner = command_runner
         self._repo_root = repo_root
         self._started_client_ids = started_client_ids
         self._container_names_by_client_id = container_names_by_client_id
         self._startup_failures = dict(startup_failures)
+        self._network_name = network_name
+        self._finalization_result: str | None = None
+        self._finalized = False
 
     @property
     def started_client_ids(self) -> tuple[str, ...]:
@@ -152,9 +175,84 @@ class DockerInvocationSession:
     def _stop_container(self, container_name: str) -> None:
         self._command_runner(["docker", "stop", container_name], cwd=self._repo_root)
 
+    async def finalize(
+        self,
+        *,
+        invocation_dir: Path,
+        failed_client_ids: tuple[str, ...],
+        keep_containers: bool,
+    ) -> str | None:
+        if self._finalized:
+            return self._finalization_result
 
-def _container_name(*, invocation_instance: int, client_id: str) -> str:
-    return f"test-farm-{invocation_directory_name(invocation_instance)}-{client_id}"
+        invocation_dir.mkdir(parents=True, exist_ok=True)
+        errors: list[str] = []
+
+        for client_id in failed_client_ids:
+            container_name = self._container_names_by_client_id.get(client_id)
+            if container_name is None:
+                continue
+            self._harvest_client_logs(
+                invocation_dir=invocation_dir,
+                client_id=client_id,
+                container_name=container_name,
+                errors=errors,
+            )
+
+        if not keep_containers:
+            for container_name in self._container_names_by_client_id.values():
+                self._remove_container(container_name=container_name, errors=errors)
+            self._remove_network(errors=errors)
+
+        self._finalization_result = "; ".join(errors) if errors else None
+        self._finalized = True
+        return self._finalization_result
+
+    def _harvest_client_logs(
+        self,
+        *,
+        invocation_dir: Path,
+        client_id: str,
+        container_name: str,
+        errors: list[str],
+    ) -> None:
+        log_result = self._command_runner(
+            ["docker", "logs", container_name],
+            cwd=self._repo_root,
+        )
+        if log_result.returncode != 0:
+            errors.append(
+                f"Failed to harvest logs for {client_id}: "
+                f"{_docker_error_detail(stderr=log_result.stderr, fallback='docker logs failed.')}"
+            )
+            return
+
+        (invocation_dir / client_diagnostic_log_name(client_id)).write_text(
+            f"{log_result.stdout}{log_result.stderr}",
+            encoding="utf-8",
+        )
+
+    def _remove_container(self, *, container_name: str, errors: list[str]) -> None:
+        remove_result = self._command_runner(
+            ["docker", "rm", "--force", container_name],
+            cwd=self._repo_root,
+        )
+        if remove_result.returncode != 0:
+            errors.append(
+                f"Failed to remove container {container_name}: "
+                f"{_docker_error_detail(stderr=remove_result.stderr, fallback='docker rm failed.')}"
+            )
+
+    def _remove_network(self, *, errors: list[str]) -> None:
+        network_remove_result = self._command_runner(
+            ["docker", "network", "rm", self._network_name],
+            cwd=self._repo_root,
+        )
+        if network_remove_result.returncode != 0:
+            errors.append(
+                f"Failed to remove runtime network {self._network_name}: "
+                f"{_docker_error_detail(stderr=network_remove_result.stderr, fallback='docker network rm failed.')}"
+            )
 
 
 def _docker_error_detail(*, stderr: str, fallback: str) -> str:

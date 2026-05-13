@@ -19,3 +19,21 @@ def invocation_directory_name(invocation_instance: int) -> str:
     """Return the stable artifact directory name for one invocation."""
 
     return f"{invocation_instance:0{INVOCATION_DIRECTORY_WIDTH}d}"
+
+
+def runtime_network_name(invocation_instance: int) -> str:
+    """Return the deterministic runtime network name for one invocation."""
+
+    return f"test-farm-{invocation_directory_name(invocation_instance)}"
+
+
+def runtime_container_name(*, invocation_instance: int, client_id: str) -> str:
+    """Return the deterministic runtime container name for one client."""
+
+    return f"{runtime_network_name(invocation_instance)}-{client_id}"
+
+
+def client_diagnostic_log_name(client_id: str) -> str:
+    """Return the deterministic diagnostic log filename for one client."""
+
+    return f"{client_id}.log"

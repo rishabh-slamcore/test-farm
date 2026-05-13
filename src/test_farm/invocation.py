@@ -83,6 +83,7 @@ async def execute_invocation(
     controller_bind_address: str,
     results_dir: Path,
     invocation_runner: InvocationRunner | None = None,
+    keep_containers: bool = False,
 ) -> tuple[Path, InvocationStatus]:
     """Execute the current invocation and write its Result File.
 
@@ -177,6 +178,7 @@ async def execute_invocation(
                     controller_server=controller_server,
                 )
     finished_at = _utc_now()
+    invocation_dir = _ensure_invocation_dir(results_dir, invocation_instance)
     client_outcomes = [
         _result_client_outcome(
             client_id=client_id,
@@ -186,7 +188,23 @@ async def execute_invocation(
         )
         for client_id in expected_client_ids
     ]
+    finalization_error = await invocation_session.finalize(
+        invocation_dir=invocation_dir,
+        failed_client_ids=tuple(
+            outcome.client_id
+            for outcome in client_outcomes
+            if outcome.client_status != ClientStatus.SUCCESS
+        ),
+        keep_containers=keep_containers,
+    )
     invocation_status = _derive_invocation_status(client_outcomes)
+    payload_invocation_error: InvocationErrorPayload | None = None
+    if finalization_error is not None:
+        invocation_status = "failed"
+        payload_invocation_error = {
+            "stage": "runtime_finalization",
+            "detail": finalization_error,
+        }
     result_file = _write_result_file(
         results_dir=results_dir,
         payload=_result_file_payload(
@@ -196,7 +214,7 @@ async def execute_invocation(
             started_at=started_at,
             finished_at=finished_at,
             expected_bundle=expected_bundle.to_payload(),
-            invocation_error=None,
+            invocation_error=payload_invocation_error,
             client_outcomes=client_outcomes,
         ),
     )
@@ -350,11 +368,16 @@ def _write_result_file(*, results_dir: Path, payload: ResultFilePayload) -> Path
     """Persist one invocation result payload to disk."""
 
     results_dir.mkdir(parents=True, exist_ok=True)
-    invocation_dir = results_dir / invocation_directory_name(payload["invocation_instance"])
-    invocation_dir.mkdir(parents=True, exist_ok=True)
+    invocation_dir = _ensure_invocation_dir(results_dir, payload["invocation_instance"])
     result_file = invocation_dir / "result.json"
     result_file.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
     return result_file
+
+
+def _ensure_invocation_dir(results_dir: Path, invocation_instance: int) -> Path:
+    invocation_dir = results_dir / invocation_directory_name(invocation_instance)
+    invocation_dir.mkdir(parents=True, exist_ok=True)
+    return invocation_dir
 
 
 def allocate_invocation_instance(results_dir: Path) -> int:

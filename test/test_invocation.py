@@ -632,6 +632,18 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
         async def stop_remaining_subjects(self) -> None:
             return None
 
+        async def finalize(
+            self,
+            *,
+            invocation_dir: Path,
+            failed_client_ids: tuple[str, ...],
+            keep_containers: bool,
+        ) -> str | None:
+            del invocation_dir
+            del failed_client_ids
+            del keep_containers
+            return None
+
     observed_client_id_batches: list[tuple[str, ...]] = []
 
     class _PartialStartupRunner:
@@ -675,6 +687,97 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
             "bundle_id": DEFAULT_BUNDLE.bundle_id,
             "error_detail": None,
         },
+    ]
+
+
+def test_execute_invocation_marks_invocation_failed_when_runtime_finalization_fails(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    reachable_bind_address: str,
+    reachable_update_server_bind_address: str,
+) -> None:
+    scenario = _write_scenario_file(tmp_path, client_count=1)
+    observed_finalization_calls: list[tuple[Path, tuple[str, ...], bool]] = []
+
+    _patch_fake_update_server(
+        monkeypatch,
+        reachable_update_server_bind_address=reachable_update_server_bind_address,
+        manifest_bundle=DEFAULT_BUNDLE,
+    )
+    _patch_fake_controller_server(
+        monkeypatch,
+        _FakeControllerServer(
+            wait_for_client_outcomes=_return_true,
+            client_outcomes={
+                "client-001": _controller_client_outcome(
+                    client_id="client-001",
+                    client_status=ClientStatus.SUCCESS,
+                )
+            },
+        ),
+    )
+
+    class _FinalizationFailingSession:
+        started_client_ids = ("client-001",)
+        startup_failures: dict[str, str] = {}
+
+        async def wait_for_subjects(self) -> None:
+            return None
+
+        async def stop_remaining_subjects(self) -> None:
+            return None
+
+        async def finalize(
+            self,
+            *,
+            invocation_dir: Path,
+            failed_client_ids: tuple[str, ...],
+            keep_containers: bool,
+        ) -> str | None:
+            observed_finalization_calls.append(
+                (invocation_dir, failed_client_ids, keep_containers)
+            )
+            return "Docker failed to remove one or more runtime artifacts."
+
+    class _FinalizationFailingRunner:
+        def start_session(
+            self,
+            *,
+            invocation_instance: int,
+            client_ids: tuple[str, ...],
+            controller_reportback_url: str,
+            update_server_url: str,
+            bundle_id: str,
+        ) -> _FinalizationFailingSession:
+            del invocation_instance
+            del client_ids
+            del controller_reportback_url
+            del update_server_url
+            del bundle_id
+            return _FinalizationFailingSession()
+
+    result_file, invocation_status = execute_invocation_sync(
+        scenario=scenario,
+        controller_bind_address=reachable_bind_address,
+        results_dir=tmp_path / "results",
+        invocation_runner=_FinalizationFailingRunner(),
+    )
+    payload = _read_payload(result_file)
+
+    assert invocation_status == "failed"
+    assert observed_finalization_calls == [(tmp_path / "results" / "001", tuple(), False)]
+    assert payload["invocation_status"] == "failed"
+    assert payload["invocation_error"] == {
+        "stage": "runtime_finalization",
+        "detail": "Docker failed to remove one or more runtime artifacts.",
+    }
+    assert payload["clients"] == [
+        {
+            "client_id": "client-001",
+            "client_status": "success",
+            "bundle_id": DEFAULT_BUNDLE.bundle_id,
+            "error_detail": None,
+        }
     ]
 
 

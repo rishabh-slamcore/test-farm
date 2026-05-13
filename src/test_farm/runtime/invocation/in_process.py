@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from typing import Mapping
 
 from test_farm.runtime.invocation_protocol import InvocationSession
@@ -62,3 +63,15 @@ class InProcessInvocationSession:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+
+    async def finalize(
+        self,
+        *,
+        invocation_dir: Path,
+        failed_client_ids: tuple[str, ...],
+        keep_containers: bool,
+    ) -> str | None:
+        del invocation_dir
+        del failed_client_ids
+        del keep_containers
+        return None

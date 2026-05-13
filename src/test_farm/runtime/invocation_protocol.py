@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Mapping, Protocol
 
 
@@ -28,6 +29,16 @@ class InvocationSession(Protocol):
 
     async def stop_remaining_subjects(self) -> None:
         """Stop any subjects still running."""
+        raise NotImplementedError
+
+    async def finalize(
+        self,
+        *,
+        invocation_dir: Path,
+        failed_client_ids: tuple[str, ...],
+        keep_containers: bool,
+    ) -> str | None:
+        """Harvest diagnostics and apply teardown or preservation policy once."""
         raise NotImplementedError
 
 
