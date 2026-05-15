@@ -9,10 +9,9 @@ from typing import cast
 import pytest
 from pytest import MonkeyPatch
 
-from test_farm.controller import ClientOutcome as ControllerClientOutcome
 from test_farm.identifiers import expected_client_ids
 from test_farm.invocation import execute_invocation
-from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientOutcome, ClientStatus
 from test_farm.runtime.invocation.in_process import InProcessInvocationRunner
 from test_farm.runtime.invocation_protocol import (
     InvocationRunner,
@@ -1049,8 +1048,8 @@ def _controller_client_outcome(
     error_detail: str | None = None,
     reported_bundle: Bundle | None = None,
     bundle_id: str = DEFAULT_BUNDLE.bundle_id,
-) -> ControllerClientOutcome:
-    return ControllerClientOutcome(
+) -> ClientOutcome:
+    return ClientOutcome(
         client_id=client_id,
         client_status=client_status,
         bundle_id=bundle_id,
@@ -1077,7 +1076,7 @@ class _FakeControllerServer:
         *,
         wait_for_client_outcomes: Callable[[float], Awaitable[bool]],
         expected_client_ids: tuple[str, ...] = expected_client_ids(1),
-        client_outcomes: dict[str, ControllerClientOutcome] | None = None,
+        client_outcomes: dict[str, ClientOutcome] | None = None,
     ) -> None:
         self.expected_client_ids = expected_client_ids
         self.client_outcomes = {} if client_outcomes is None else dict(client_outcomes)

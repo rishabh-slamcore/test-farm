@@ -3,7 +3,7 @@
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, NotRequired, TypedDict
 
 
 class ClientStatus(StrEnum):
@@ -14,6 +14,12 @@ class ClientStatus(StrEnum):
     SUCCESS = "success"
     DOWNLOAD_FAILED = "download_failed"
     CHECKSUM_MISMATCH = "checksum_mismatch"
+
+
+class BundlePayload(TypedDict):
+    bundle_id: str
+    byte_count: int
+    checksum: str
 
 
 @dataclass(frozen=True)
@@ -39,7 +45,7 @@ class Bundle:
             checksum=hashlib.sha256(bundle_bytes).hexdigest(),
         )
 
-    def to_payload(self) -> dict[str, str | int]:
+    def to_payload(self) -> BundlePayload:
         """Serialize the bundle for JSON result payloads.
 
         :returns: JSON-serializable bundle payload.
@@ -50,6 +56,38 @@ class Bundle:
             "byte_count": self.byte_count,
             "checksum": self.checksum,
         }
+
+
+class ClientOutcomePayload(TypedDict):
+    client_id: str
+    client_status: ClientStatus
+    bundle_id: str
+    error_detail: NotRequired[str | None]
+    reported_bundle: NotRequired[BundlePayload]
+
+
+@dataclass(frozen=True)
+class ClientOutcome:
+    """One client outcome recorded in a result file."""
+
+    client_id: str
+    client_status: ClientStatus
+    bundle_id: str
+    error_detail: str | None
+    reported_bundle: Bundle | None = None
+
+    def to_payload(self) -> ClientOutcomePayload:
+        payload: ClientOutcomePayload = {
+            "client_id": self.client_id,
+            "client_status": self.client_status,
+            "bundle_id": self.bundle_id,
+            "error_detail": self.error_detail,
+        }
+        if self.error_detail is not None:
+            payload["error_detail"] = self.error_detail
+        if self.reported_bundle is not None:
+            payload["reported_bundle"] = self.reported_bundle.to_payload()
+        return payload
 
 
 @dataclass(frozen=True)

@@ -7,9 +7,9 @@ from collections.abc import Callable
 import httpx
 from pytest import MonkeyPatch
 
-from test_farm.controller import ClientOutcome, start_controller_server
+from test_farm.controller import start_controller_server
 from test_farm.identifiers import expected_client_ids
-from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientOutcome, ClientStatus
 from test_farm.subjects.toy_client import run_toy_client
 from test_farm.subjects.update_server import start_update_server
 

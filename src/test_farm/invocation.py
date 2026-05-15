@@ -10,11 +10,17 @@ from typing import Literal, Mapping, TypedDict, cast
 
 import httpx
 
-from test_farm.controller import ClientOutcome as ControllerClientOutcome
 from test_farm.controller import ControllerServer, start_controller_server
 from test_farm.identifiers import expected_client_ids as build_expected_client_ids
 from test_farm.identifiers import invocation_directory_name
-from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientStatus
+from test_farm.models import (
+    DEFAULT_BUNDLE,
+    Bundle,
+    BundlePayload,
+    ClientOutcome,
+    ClientOutcomePayload,
+    ClientStatus,
+)
 from test_farm.runtime.invocation.factory import create_default_invocation_runner
 from test_farm.runtime.invocation_protocol import (
     InvocationRunner,
@@ -37,27 +43,6 @@ TIMED_OUT_ERROR_DETAIL = "No receipt received before timeout."
 type InvocationStatus = Literal["success", "failed"]
 
 
-@dataclass(frozen=True)
-class ClientOutcome:
-    """One client outcome recorded in a result file."""
-
-    client_id: str
-    client_status: ClientStatus
-    bundle_id: str
-    error_detail: str | None
-    reported_bundle: Bundle | None = None
-
-
-class ClientOutcomePayload(TypedDict, total=False):
-    """Serialized one-client result entry."""
-
-    client_id: str
-    client_status: ClientStatus
-    bundle_id: str
-    error_detail: str | None
-    reported_bundle: dict[str, str | int]
-
-
 class InvocationErrorPayload(TypedDict):
     """Serialized top-level invocation setup failure."""
 
@@ -73,7 +58,7 @@ class ResultFilePayload(TypedDict):
     invocation_status: InvocationStatus
     started_at: str
     finished_at: str
-    expected_bundle: dict[str, str | int] | None
+    expected_bundle: BundlePayload | None
     invocation_error: InvocationErrorPayload | None
     clients: list[ClientOutcomePayload]
 
@@ -263,7 +248,7 @@ async def _wait_for_invocation_completion(
 def _have_outcomes_for_every_expected_client(
     *,
     expected_client_ids: tuple[str, ...],
-    controller_client_outcomes: dict[str, ControllerClientOutcome],
+    controller_client_outcomes: dict[str, ClientOutcome],
 ) -> bool:
     return all(client_id in controller_client_outcomes for client_id in expected_client_ids)
 
@@ -271,7 +256,7 @@ def _have_outcomes_for_every_expected_client(
 def _result_client_outcome(
     *,
     client_id: str,
-    controller_client_outcome: ControllerClientOutcome | None,
+    controller_client_outcome: ClientOutcome | None,
     expected_bundle: Bundle,
     startup_failures: Mapping[str, str],
 ) -> ClientOutcome:
@@ -308,7 +293,7 @@ def _result_file_payload(
     invocation_status: InvocationStatus,
     started_at: str,
     finished_at: str,
-    expected_bundle: dict[str, str | int] | None,
+    expected_bundle: BundlePayload | None,
     invocation_error: InvocationErrorPayload | None,
     client_outcomes: list[ClientOutcome],
 ) -> ResultFilePayload:
@@ -322,20 +307,8 @@ def _result_file_payload(
         "finished_at": finished_at,
         "expected_bundle": expected_bundle,
         "invocation_error": invocation_error,
-        "clients": [_client_outcome_payload(outcome) for outcome in client_outcomes],
+        "clients": [outcome.to_payload() for outcome in client_outcomes],
     }
-
-
-def _client_outcome_payload(outcome: ClientOutcome) -> ClientOutcomePayload:
-    payload: ClientOutcomePayload = {
-        "client_id": outcome.client_id,
-        "client_status": outcome.client_status,
-        "bundle_id": outcome.bundle_id,
-        "error_detail": outcome.error_detail,
-    }
-    if outcome.reported_bundle is not None:
-        payload["reported_bundle"] = outcome.reported_bundle.to_payload()
-    return payload
 
 
 def _write_failed_invocation_result(
@@ -345,7 +318,7 @@ def _write_failed_invocation_result(
     scenario_file: Path,
     started_at: str,
     invocation_error: InvocationErrorPayload,
-    expected_bundle: dict[str, str | int] | None = None,
+    expected_bundle: BundlePayload | None = None,
 ) -> Path:
     """Persist a failed invocation result for setup-stage errors."""
 

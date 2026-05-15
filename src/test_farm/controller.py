@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from test_farm.models import Bundle, ClientStatus, Receipt
+from test_farm.models import Bundle, ClientOutcome, ClientStatus, Receipt
 
 
 @dataclass(frozen=True)
@@ -19,17 +19,6 @@ class ControllerResponse:
 
     status_code: int
     body: dict[str, object]
-
-
-@dataclass(frozen=True)
-class ClientOutcome:
-    """Controller-owned per-client outcome for one invocation."""
-
-    client_id: str
-    client_status: ClientStatus
-    bundle_id: str
-    error_detail: str | None
-    reported_bundle: Bundle | None = None
 
 
 class ControllerState:
