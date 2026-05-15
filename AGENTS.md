@@ -39,6 +39,8 @@ Agent note: in the Codex sandbox,Do not rely on streamed pytest output. Run pyte
 
 Agent note: always run `uv run pytest -k test_execute_invocation_completes_two_client_baseline_with_real_subjects` with elevated permissions outside the sandbox, because this test may need host-level socket binding.
 
+Agent note: always run `uv run pytest test/test_runtime_invocation_integration.py --run-host-only` with elevated permissions outside the sandbox, because the Docker runner integration tests require host-level networking and a real Docker runtime.
+
 Agent note: when a new test is added that binds to sockets or otherwise requires host-level networking privileges, add that test command to this elevated-permissions note list in `AGENTS.md` so future runs are not attempted in the sandbox first.
 
 ## Python Best Practices

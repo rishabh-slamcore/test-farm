@@ -47,3 +47,6 @@ packages = ["test_farm"]
 testpaths = ["test"]
 addopts = "--disable-plugin-autoload"
 cache_dir = "/tmp/pytest-cache"
+markers = [
+  "host_only: integration tests that require real host socket binding or Docker runtime access",
+]
