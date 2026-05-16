@@ -45,10 +45,12 @@ class InvocationSession(Protocol):
 class InvocationRunner(Protocol):
     """Start one runtime session for an invocation."""
 
+    async def start_update_server(self, *, bind_address: str) -> str:
+        raise NotImplementedError
+
     def start_session(
         self,
         *,
-        invocation_instance: int,
         client_ids: tuple[str, ...],
         controller_reportback_url: str,
         update_server_url: str,

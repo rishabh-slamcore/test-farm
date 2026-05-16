@@ -85,10 +85,12 @@ async def execute_invocation(
     update_server_bind_address = derive_update_server_bind_address(
         normalized_controller_bind_address
     )
-    resolved_invocation_runner = (
-        create_default_invocation_runner() if invocation_runner is None else invocation_runner
-    )
     invocation_instance = allocate_invocation_instance(results_dir)
+    resolved_invocation_runner = (
+        create_default_invocation_runner(invocation_instance=invocation_instance)
+        if invocation_runner is None
+        else invocation_runner
+    )
     started_at = _utc_now()
 
     async with start_update_server(bind_address=update_server_bind_address) as update_server:
@@ -122,7 +124,6 @@ async def execute_invocation(
         ) as controller_server:
             try:
                 invocation_session = resolved_invocation_runner.start_session(
-                    invocation_instance=invocation_instance,
                     client_ids=expected_client_ids,
                     controller_reportback_url=service_url(normalized_controller_bind_address),
                     update_server_url=update_server.base_url,

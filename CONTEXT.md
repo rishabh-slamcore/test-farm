@@ -66,6 +66,10 @@ _Avoid_: Per-client veth shaper, NAT gateway
 A routed test-network model where server and client subnets reach each other through the Router Container without rewriting packet addresses.
 _Avoid_: NAT, masquerading
 
+**Bundle File**: The host-side file whose bytes define the expected bundle for an invocation. The host derives `byte_count` and `checksum` from the Bundle File, and the Update Server serves those same bytes to clients.
+_Avoid_: Manifest file, fixture, artifact path, generated bundle
+
+
 ## Relationships
 
 - A **baseline result** precedes impaired scenario results in the roadmap.

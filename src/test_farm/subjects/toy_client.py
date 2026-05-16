@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from os import environ
 from typing import Mapping
 
@@ -10,6 +11,7 @@ import httpx
 
 from test_farm.models import Bundle, Receipt
 
+logger = logging.getLogger(__name__)
 INVOCATION_INSTANCE_ENV = "TEST_FARM_INVOCATION_INSTANCE"
 CLIENT_ID_ENV = "TEST_FARM_CLIENT_ID"
 UPDATE_SERVER_URL_ENV = "TEST_FARM_UPDATE_SERVER_URL"
@@ -51,7 +53,8 @@ async def run_toy_client(environment: Mapping[str, str] | None = None) -> int:
                         error_detail=str(fetch_error),
                     ),
                 )
-            except OSError:
+            except OSError as err:
+                logger.exception(f"Error:{err}")
                 return 2
             return 1
 
@@ -68,9 +71,10 @@ async def run_toy_client(environment: Mapping[str, str] | None = None) -> int:
                     error_detail=None,
                 ),
             )
-        except OSError:
+        except OSError as err:
+            logger.exception(f"Error:{err}")
             return 2
-
+    print("returning")
     return 0
 
 
@@ -90,6 +94,7 @@ async def _post_receipt(
 ) -> None:
     body = json.dumps(receipt.to_payload()).encode("utf-8")
     try:
+        print("try post")
         response = await client.post(
             (
                 f"{controller_reportback_url}/invocations/"

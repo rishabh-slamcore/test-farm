@@ -91,6 +91,8 @@ def test_prepare_runtime_reports_when_image_is_already_prepared(
         result.output
         == "Baseline toy-client runtime image test-farm/toy-client-runtime:latest already exists. "
         "Freshness is not checked; rerun with --force to rebuild it.\n"
+        "Baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest already exists. "
+        "Freshness is not checked; rerun with --force to rebuild it.\n"
     )
 
 

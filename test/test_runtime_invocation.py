@@ -20,7 +20,7 @@ def test_docker_invocation_runner_raises_runtime_setup_error_when_image_inspect_
         observed_calls.append((args, cwd))
         return CompletedProcess(args=args, returncode=1, stdout="", stderr="image missing")
 
-    runner = DockerInvocationRunner(command_runner=_command_runner)
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
 
     with pytest.raises(
         RuntimeSetupError,
@@ -31,7 +31,6 @@ def test_docker_invocation_runner_raises_runtime_setup_error_when_image_inspect_
         ),
     ):
         runner.start_session(
-            invocation_instance=7,
             client_ids=("client-001",),
             controller_reportback_url="http://192.168.1.10:8080",
             update_server_url="http://192.168.1.10:8081",
@@ -62,10 +61,9 @@ def test_docker_invocation_runner_attempts_every_expected_client_before_returnin
             )
         return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
 
-    runner = DockerInvocationRunner(command_runner=_command_runner)
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
 
     session = runner.start_session(
-        invocation_instance=7,
         client_ids=("client-001", "client-002"),
         controller_reportback_url="http://192.168.1.10:8080",
         update_server_url="http://192.168.1.10:8081",
@@ -143,9 +141,8 @@ def test_docker_invocation_session_harvests_failed_client_logs_and_removes_runti
             )
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    runner = DockerInvocationRunner(command_runner=_command_runner)
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
     session = runner.start_session(
-        invocation_instance=7,
         client_ids=("client-001", "client-002"),
         controller_reportback_url="http://192.168.1.10:8080",
         update_server_url="http://192.168.1.10:8081",
@@ -230,9 +227,8 @@ def test_docker_invocation_session_preserves_runtime_artifacts_when_keep_contain
             return CompletedProcess(args=args, returncode=0, stdout="[]", stderr="")
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    runner = DockerInvocationRunner(command_runner=_command_runner)
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
     session = runner.start_session(
-        invocation_instance=7,
         client_ids=("client-001",),
         controller_reportback_url="http://192.168.1.10:8080",
         update_server_url="http://192.168.1.10:8081",
@@ -303,9 +299,8 @@ def test_docker_invocation_session_finalization_is_best_effort_and_idempotent(
             )
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    runner = DockerInvocationRunner(command_runner=_command_runner)
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
     session = runner.start_session(
-        invocation_instance=7,
         client_ids=("client-001", "client-002"),
         controller_reportback_url="http://192.168.1.10:8080",
         update_server_url="http://192.168.1.10:8081",

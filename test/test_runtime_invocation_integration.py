@@ -28,7 +28,11 @@ def test_in_process_invocation_runner_records_success_client_outcome(
 
     client_outcomes = asyncio.run(
         _run_successful_runner_session(
-            runner=InProcessInvocationRunner(),
+            runner=InProcessInvocationRunner(
+                invocation_instance=_invocation_instance_from_bind_address(
+                    reachable_bind_address
+                )
+            ),
             controller_bind_address=reachable_bind_address,
             update_server_bind_address=reachable_update_server_bind_address,
             invocation_dir=tmp_path,
@@ -48,12 +52,14 @@ def test_in_process_invocation_runner_records_success_client_outcome(
 def test_in_process_invocation_runner_records_download_failed_client_outcome(
     tmp_path: Path, reachable_bind_address: str, reachable_update_server_bind_address: str
 ) -> None:
-    controller_bind_address = reachable_bind_address
-
     client_outcomes = asyncio.run(
         _run_download_failed_runner_session(
-            runner=InProcessInvocationRunner(),
-            controller_bind_address=controller_bind_address,
+            runner=InProcessInvocationRunner(
+                invocation_instance=_invocation_instance_from_bind_address(
+                    reachable_bind_address
+                )
+            ),
+            controller_bind_address=reachable_bind_address,
             update_server_bind_address=reachable_update_server_bind_address,
             invocation_dir=tmp_path,
         )
@@ -74,7 +80,11 @@ def test_docker_invocation_runner_records_success_client_outcome(
 
     client_outcomes = asyncio.run(
         _run_successful_runner_session(
-            runner=DockerInvocationRunner(),
+            runner=DockerInvocationRunner(
+                invocation_instance=_invocation_instance_from_bind_address(
+                    reachable_bind_address
+                )
+            ),
             controller_bind_address=reachable_bind_address,
             update_server_bind_address=reachable_update_server_bind_address,
             invocation_dir=tmp_path,
@@ -98,7 +108,11 @@ def test_docker_invocation_runner_records_download_failed_client_outcome(
 
     client_outcomes = asyncio.run(
         _run_download_failed_runner_session(
-            runner=DockerInvocationRunner(),
+            runner=DockerInvocationRunner(
+                invocation_instance=_invocation_instance_from_bind_address(
+                    reachable_bind_address
+                )
+            ),
             controller_bind_address=reachable_bind_address,
             update_server_bind_address=reachable_update_server_bind_address,
             invocation_dir=tmp_path,
@@ -122,38 +136,35 @@ async def _run_invocation(
     invocation_instance: int,
     run_update_server: bool = True,
 ) -> dict[str, ClientOutcome]:
-    async with AsyncExitStack() as stack:
-        update_server = None
-        update_server_url = f"http://{update_server_bind_address}"
-        if run_update_server:
-            update_server = await stack.enter_async_context(
-                start_update_server(bind_address=update_server_bind_address)
+
+    update_server_url = f"http://{update_server_bind_address}"
+    if run_update_server:
+        update_server_url = await runner.start_update_server(
+            bind_address=update_server_bind_address
+        )
+    async with start_controller_server(
+        bind_address=controller_bind_address,
+        invocation_instance=invocation_instance,
+        expected_client_ids=expected_client_ids(1),
+        expected_bundle=DEFAULT_BUNDLE,
+    ) as controller_server:
+        session = runner.start_session(
+            client_ids=expected_client_ids(1),
+            controller_reportback_url=f"http://{controller_bind_address}",
+            update_server_url=update_server_url,
+            bundle_id=DEFAULT_BUNDLE.bundle_id,
+        )
+        try:
+            all_outcomes_recorded = await controller_server.wait_for_client_outcomes(
+                timeout_seconds=5
             )
-            update_server_url = update_server.base_url
-        async with start_controller_server(
-            bind_address=controller_bind_address,
-            invocation_instance=invocation_instance,
-            expected_client_ids=expected_client_ids(1),
-            expected_bundle=DEFAULT_BUNDLE,
-        ) as controller_server:
-            session = runner.start_session(
-                invocation_instance=invocation_instance,
-                client_ids=expected_client_ids(1),
-                controller_reportback_url=f"http://{controller_bind_address}",
-                update_server_url=update_server_url,
-                bundle_id=DEFAULT_BUNDLE.bundle_id,
+            await session.wait_for_subjects()
+        finally:
+            await session.finalize(
+                invocation_dir=invocation_dir,
+                failed_client_ids=tuple(),
+                keep_containers=False,
             )
-            try:
-                all_outcomes_recorded = await controller_server.wait_for_client_outcomes(
-                    timeout_seconds=5
-                )
-                await session.wait_for_subjects()
-            finally:
-                await session.finalize(
-                    invocation_dir=invocation_dir,
-                    failed_client_ids=tuple(),
-                    keep_containers=False,
-                )
 
     assert all_outcomes_recorded is True
     return controller_server.client_outcomes

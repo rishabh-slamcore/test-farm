@@ -334,7 +334,7 @@ def test_execute_invocation_writes_failed_result_file_when_expected_bundle_fetch
         scenario=scenario,
         controller_bind_address=reachable_bind_address,
         results_dir=tmp_path / "results",
-        invocation_runner=InProcessInvocationRunner(),
+        invocation_runner=InProcessInvocationRunner(invocation_instance=7),
     )
     payload = _read_payload(result_file)
 
@@ -557,16 +557,17 @@ def test_execute_invocation_writes_top_level_runtime_setup_failure(
     )
 
     class _SetupFailingRunner:
+        async def start_update_server(self, *, bind_address: str) -> str:
+            return ""
+
         def start_session(
             self,
             *,
-            invocation_instance: int,
             client_ids: tuple[str, ...],
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
         ) -> InvocationSession:
-            del invocation_instance
             del client_ids
             del controller_reportback_url
             del update_server_url
@@ -646,16 +647,17 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
     observed_client_id_batches: list[tuple[str, ...]] = []
 
     class _PartialStartupRunner:
+        async def start_update_server(self, *, bind_address: str) -> str:
+            return ""
+
         def start_session(
             self,
             *,
-            invocation_instance: int,
             client_ids: tuple[str, ...],
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
         ) -> _StartupFailingSession:
-            del invocation_instance
             del controller_reportback_url
             del update_server_url
             del bundle_id
@@ -739,16 +741,17 @@ def test_execute_invocation_marks_invocation_failed_when_runtime_finalization_fa
             return "Docker failed to remove one or more runtime artifacts."
 
     class _FinalizationFailingRunner:
+        async def start_update_server(self, *, bind_address: str) -> str:
+            return ""
+
         def start_session(
             self,
             *,
-            invocation_instance: int,
             client_ids: tuple[str, ...],
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
         ) -> _FinalizationFailingSession:
-            del invocation_instance
             del client_ids
             del controller_reportback_url
             del update_server_url
@@ -1036,7 +1039,9 @@ def _patch_toy_client(
 def _patch_default_invocation_runner(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         "test_farm.invocation.create_default_invocation_runner",
-        lambda: InProcessInvocationRunner(),
+        lambda invocation_instance: InProcessInvocationRunner(
+            invocation_instance=invocation_instance
+        ),
         raising=False,
     )
 

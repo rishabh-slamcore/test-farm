@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse, Response
 
 from test_farm.models import DEFAULT_BUNDLE, DEFAULT_BUNDLE_BYTES
 
+UPDATE_SERVER_BIND_ADDRESS_ENV = "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS"
+
 
 def create_update_server_app() -> FastAPI:
     """Build the Update Server application."""
@@ -62,15 +64,14 @@ class UpdateServer:
         )
         self._server_task: asyncio.Task[None] | None = None
 
-    async def __aenter__(self) -> "UpdateServer":
+    async def start(self) -> "UpdateServer":
+        if self._server_task is not None:
+            return self
         self._server_task = asyncio.create_task(self._serve())
         await self._wait_until_started()
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        del exc_type
-        del exc
-        del traceback
+    async def stop(self) -> None:
         self._server.should_exit = True
         if self._server_task is not None:
             await self._server_task
@@ -84,6 +85,20 @@ class UpdateServer:
                 await self._server_task
                 raise RuntimeError("Update Server stopped before becoming ready.")
             await asyncio.sleep(0.01)
+
+    async def serve(self) -> None:
+        if self._server_task is None:
+            raise RuntimeError("Server has not been started")
+        await self._server_task
+
+    async def __aenter__(self) -> "UpdateServer":
+        return await self.start()
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        del exc_type
+        del exc
+        del traceback
+        await self.stop()
 
 
 def start_update_server(*, bind_address: str) -> UpdateServer:

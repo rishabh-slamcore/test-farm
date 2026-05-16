@@ -7,7 +7,11 @@ import typer
 
 from test_farm.invocation import execute_invocation
 from test_farm.runtime.networking import parse_reachable_service_endpoint
-from test_farm.runtime.preparation import RuntimePreparationError, prepare_toy_client_runtime
+from test_farm.runtime.preparation import (
+    RuntimePreparationError,
+    prepare_toy_client_runtime,
+    prepare_toy_update_server_runtime,
+)
 from test_farm.scenario import ScenarioFileError, load_scenario_file
 
 app = typer.Typer(help="Controlled update-broadcast test harness.")
@@ -78,22 +82,37 @@ def prepare_runtime(
     """
 
     try:
-        result = prepare_toy_client_runtime(force_rebuild=force)
+        result_client = prepare_toy_client_runtime(force_rebuild=force)
+        result_server = prepare_toy_update_server_runtime(force_rebuild=force)
     except RuntimePreparationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
 
-    if result.created:
+    if result_client.created:
         if force:
-            typer.echo(f"Rebuilt baseline toy-client runtime image {result.image_tag}.")
+            typer.echo(f"Rebuilt baseline toy-client runtime image {result_client.image_tag}.")
             return
-        typer.echo(f"Prepared baseline toy-client runtime image {result.image_tag}.")
-        return
+        typer.echo(f"Prepared baseline toy-client runtime image {result_client.image_tag}.")
+    else:
+        typer.echo(
+            f"Baseline toy-client runtime image {result_client.image_tag} already exists. "
+            "Freshness is not checked; rerun with --force to rebuild it."
+        )
 
-    typer.echo(
-        f"Baseline toy-client runtime image {result.image_tag} already exists. "
-        "Freshness is not checked; rerun with --force to rebuild it."
-    )
+    if result_server.created:
+        if force:
+            typer.echo(
+                f"Rebuilt baseline toy-update server runtime image {result_server.image_tag}."
+            )
+            return
+        typer.echo(
+            f"Prepared baseline toy-update server runtime image {result_server.image_tag}."
+        )
+    else:
+        typer.echo(
+            f"Baseline toy-update server runtime image {result_server.image_tag} already exists. "
+            "Freshness is not checked; rerun with --force to rebuild it."
+        )
 
 
 def main() -> None:

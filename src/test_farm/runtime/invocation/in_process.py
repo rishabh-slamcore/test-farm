@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Mapping
 
@@ -11,15 +12,26 @@ from test_farm.subjects.toy_client import (
     UPDATE_SERVER_URL_ENV,
     run_toy_client,
 )
+from test_farm.subjects.update_server import UpdateServer
 
 
 class InProcessInvocationRunner:
     """Run toy clients as host-side tasks behind the runtime boundary."""
 
+    def __init__(self, invocation_instance: int) -> None:
+        self._update_server: UpdateServer | None = None
+        self._invocation_instance = invocation_instance
+
+    async def start_update_server(self, bind_address: str) -> str:
+        if self._update_server is not None:
+            raise RuntimeError("Server has already started")
+        self._update_server = UpdateServer(bind_address=bind_address)
+        await self._update_server.start()
+        return self._update_server.base_url
+
     def start_session(
         self,
         *,
-        invocation_instance: int,
         client_ids: tuple[str, ...],
         controller_reportback_url: str,
         update_server_url: str,
@@ -30,7 +42,7 @@ class InProcessInvocationRunner:
             tasks[client_id] = asyncio.create_task(
                 run_toy_client(
                     {
-                        INVOCATION_INSTANCE_ENV: str(invocation_instance),
+                        INVOCATION_INSTANCE_ENV: str(self._invocation_instance),
                         CLIENT_ID_ENV: client_id,
                         UPDATE_SERVER_URL_ENV: update_server_url,
                         CONTROLLER_REPORTBACK_URL_ENV: controller_reportback_url,

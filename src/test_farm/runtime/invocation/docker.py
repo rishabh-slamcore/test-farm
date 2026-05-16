@@ -6,12 +6,19 @@ from typing import Mapping
 
 from test_farm.identifiers import (
     client_diagnostic_log_name,
+    client_runtime_network_name,
     runtime_container_name,
-    runtime_network_name,
+    server_container_name,
+    server_runtime_network_name,
 )
 from test_farm.runtime.command_runner import CommandRunner
 from test_farm.runtime.invocation_protocol import InvocationSession, RuntimeSetupError
-from test_farm.runtime.preparation import PREPARED_TOY_CLIENT_IMAGE_TAG, REPO_ROOT
+from test_farm.runtime.networking import service_url
+from test_farm.runtime.preparation import (
+    PREPARED_TOY_CLIENT_IMAGE_TAG,
+    PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
+    REPO_ROOT,
+)
 from test_farm.subjects.toy_client import (
     BUNDLE_ID_ENV,
     CLIENT_ID_ENV,
@@ -19,6 +26,7 @@ from test_farm.subjects.toy_client import (
     INVOCATION_INSTANCE_ENV,
     UPDATE_SERVER_URL_ENV,
 )
+from test_farm.subjects.update_server import UPDATE_SERVER_BIND_ADDRESS_ENV
 
 
 class DockerInvocationRunner:
@@ -27,42 +35,31 @@ class DockerInvocationRunner:
     def __init__(
         self,
         *,
+        invocation_instance: int,
         command_runner: CommandRunner | None = None,
         repo_root: Path = REPO_ROOT,
     ) -> None:
         self._command_runner = (
             _default_command_runner if command_runner is None else command_runner
         )
-        self._repo_root = repo_root
-
-    def start_session(
-        self,
-        *,
-        invocation_instance: int,
-        client_ids: tuple[str, ...],
-        controller_reportback_url: str,
-        update_server_url: str,
-        bundle_id: str,
-    ) -> InvocationSession:
         if which("docker") is None:
             raise RuntimeSetupError("Docker CLI is required to run the baseline invocation.")
+        self._invocation_instance = invocation_instance
+        self._repo_root = repo_root
 
+    def _check_image_exists(self, img_name: str) -> None:
         inspect_result = self._command_runner(
-            ["docker", "image", "inspect", PREPARED_TOY_CLIENT_IMAGE_TAG],
+            ["docker", "image", "inspect", img_name],
             cwd=self._repo_root,
         )
         if inspect_result.returncode != 0:
             raise RuntimeSetupError(
                 "Baseline toy-client runtime image "
-                f"{PREPARED_TOY_CLIENT_IMAGE_TAG} is missing. "
+                f"{img_name} is missing. "
                 "Run `test-farm prepare-runtime` first."
             )
 
-        started_client_ids: list[str] = []
-        container_names_by_client_id: dict[str, str] = {}
-        startup_failures: dict[str, str] = {}
-        network_name = runtime_network_name(invocation_instance)
-
+    def _create_network(self, network_name: str) -> None:
         network_create_result = self._command_runner(
             ["docker", "network", "create", network_name],
             cwd=self._repo_root,
@@ -75,9 +72,54 @@ class DockerInvocationRunner:
                 )
             )
 
+    async def start_update_server(self, *, bind_address: str) -> str:
+        self._check_image_exists(PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG)
+        server_name = server_container_name(self._invocation_instance)
+        server_network_name = server_runtime_network_name(self._invocation_instance)
+        self._create_network(server_network_name)
+        start_server_result = self._command_runner(
+            [
+                "docker",
+                "run",
+                "--detach",
+                "--name",
+                server_name,
+                "--network",
+                server_network_name,
+                "--env",
+                f"{UPDATE_SERVER_BIND_ADDRESS_ENV}={bind_address}",
+                PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
+            ],
+            cwd=self._repo_root,
+        )
+        if start_server_result.returncode != 0:
+            raise RuntimeSetupError(
+                _docker_error_detail(
+                    stderr=start_server_result.stderr,
+                    fallback=f"Docker failed to start runtime-isolated update server {server_name}.",
+                )
+            )
+        return service_url(bind_address)
+
+    def start_session(
+        self,
+        *,
+        client_ids: tuple[str, ...],
+        controller_reportback_url: str,
+        update_server_url: str,
+        bundle_id: str,
+    ) -> InvocationSession:
+
+        self._check_image_exists(PREPARED_TOY_CLIENT_IMAGE_TAG)
+        started_client_ids: list[str] = []
+        container_names_by_client_id: dict[str, str] = {}
+        startup_failures: dict[str, str] = {}
+        network_name = client_runtime_network_name(self._invocation_instance)
+
+        self._create_network(network_name)
         for client_id in client_ids:
             container_name = runtime_container_name(
-                invocation_instance=invocation_instance,
+                invocation_instance=self._invocation_instance,
                 client_id=client_id,
             )
             run_result = self._command_runner(
@@ -90,7 +132,7 @@ class DockerInvocationRunner:
                     "--network",
                     network_name,
                     "--env",
-                    f"{INVOCATION_INSTANCE_ENV}={invocation_instance}",
+                    f"{INVOCATION_INSTANCE_ENV}={self._invocation_instance}",
                     "--env",
                     f"{CLIENT_ID_ENV}={client_id}",
                     "--env",
