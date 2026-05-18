@@ -194,6 +194,69 @@ def test_execute_invocation_records_multi_client_success_payload_and_launches_ea
     ]
 
 
+def test_execute_invocation_derives_expected_bundle_from_default_bundle_file(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    reachable_bind_address = "192.168.1.10:8080"
+    reachable_update_server_bind_address = "192.168.1.10:8081"
+    bundle_bytes = b"bundle bytes from host bundle file\n"
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(bundle_bytes)
+    expected_bundle = Bundle.from_bytes(
+        bundle_id=DEFAULT_BUNDLE.bundle_id,
+        bundle_bytes=bundle_bytes,
+    )
+    observed_expected_bundles: list[Bundle] = []
+    scenario = _write_scenario_file(tmp_path, client_count=1)
+    fake_controller_server = _FakeControllerServer(wait_for_client_outcomes=_return_true)
+
+    monkeypatch.setattr(
+        "test_farm.bundles.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.invocation.start_update_server",
+        lambda **kwargs: _FakeUpdateServer(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.invocation.derive_update_server_bind_address",
+        lambda bind_address: reachable_update_server_bind_address,
+        raising=False,
+    )
+    _patch_fake_controller_server(
+        monkeypatch,
+        fake_controller_server,
+        observed_expected_bundles=observed_expected_bundles,
+    )
+    _patch_toy_client(
+        monkeypatch,
+        controller_server=fake_controller_server,
+        reported_bundle=expected_bundle,
+    )
+
+    result_file, invocation_status = execute_invocation_sync(
+        scenario=scenario,
+        controller_bind_address=reachable_bind_address,
+        results_dir=tmp_path / "results",
+    )
+    payload = _read_payload(result_file)
+
+    assert invocation_status == "success"
+    assert observed_expected_bundles == [expected_bundle]
+    assert payload["expected_bundle"] == expected_bundle.to_payload()
+    assert payload["clients"] == [
+        {
+            "client_id": "client-001",
+            "client_status": "success",
+            "bundle_id": expected_bundle.bundle_id,
+            "error_detail": None,
+        }
+    ]
+
+
 def test_execute_invocation_preserves_successful_clients_when_receipts_are_missing_or_failed(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -314,7 +377,7 @@ def test_execute_invocation_uses_update_server_manifest_bundle_for_controller_an
     ]
 
 
-def test_execute_invocation_writes_failed_result_file_when_expected_bundle_fetch_raises_error(
+def test_execute_invocation_writes_failed_result_file_when_bundle_file_read_raises_error(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     reachable_bind_address: str,
@@ -343,7 +406,7 @@ def test_execute_invocation_writes_failed_result_file_when_expected_bundle_fetch
     assert payload["invocation_status"] == "failed"
     assert payload["expected_bundle"] is None
     assert payload["invocation_error"] == {
-        "stage": "manifest_fetch",
+        "stage": "bundle_file_read",
         "detail": "Could not fetch expected bundle manifest.",
     }
     assert payload["clients"] == []
@@ -935,13 +998,12 @@ def _patch_fake_update_server(
     )
     if manifest_error is not None:
 
-        async def _raise_manifest_error(**kwargs: object) -> Bundle:
-            del kwargs
-            raise manifest_error
+        def _raise_bundle_file_error() -> Bundle:
+            raise OSError(str(manifest_error))
 
         monkeypatch.setattr(
-            "test_farm.invocation.fetch_expected_bundle_from_update_server",
-            _raise_manifest_error,
+            "test_farm.invocation.load_default_bundle",
+            _raise_bundle_file_error,
             raising=False,
         )
         return
@@ -951,13 +1013,12 @@ def _patch_fake_update_server(
             "manifest_bundle must be provided when manifest_error is not set."
         )
 
-    async def _return_configured_manifest_bundle(**kwargs: object) -> Bundle:
-        del kwargs
+    def _return_configured_bundle() -> Bundle:
         return manifest_bundle
 
     monkeypatch.setattr(
-        "test_farm.invocation.fetch_expected_bundle_from_update_server",
-        _return_configured_manifest_bundle,
+        "test_farm.invocation.load_default_bundle",
+        _return_configured_bundle,
         raising=False,
     )
 

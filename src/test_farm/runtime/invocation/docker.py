@@ -4,6 +4,7 @@ from shutil import which
 from subprocess import CompletedProcess, run
 from typing import Mapping
 
+from test_farm.bundles import DEFAULT_BUNDLE_FILE
 from test_farm.identifiers import (
     client_diagnostic_log_name,
     client_runtime_network_name,
@@ -26,7 +27,12 @@ from test_farm.subjects.toy_client import (
     INVOCATION_INSTANCE_ENV,
     UPDATE_SERVER_URL_ENV,
 )
-from test_farm.subjects.update_server import UPDATE_SERVER_BIND_ADDRESS_ENV
+from test_farm.subjects.update_server import (
+    UPDATE_SERVER_BIND_ADDRESS_ENV,
+    UPDATE_SERVER_BUNDLE_DIR_ENV,
+)
+
+UPDATE_SERVER_CONTAINER_BUNDLE_DIR = "/test-farm/bundles"
 
 
 class DockerInvocationRunner:
@@ -46,6 +52,8 @@ class DockerInvocationRunner:
             raise RuntimeSetupError("Docker CLI is required to run the baseline invocation.")
         self._invocation_instance = invocation_instance
         self._repo_root = repo_root
+        self._server_container_name: str | None = None
+        self._server_network_name: str | None = None
 
     def _check_image_exists(self, img_name: str) -> None:
         inspect_result = self._command_runner(
@@ -74,20 +82,29 @@ class DockerInvocationRunner:
 
     async def start_update_server(self, *, bind_address: str) -> str:
         self._check_image_exists(PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG)
-        server_name = server_container_name(self._invocation_instance)
-        server_network_name = server_runtime_network_name(self._invocation_instance)
-        self._create_network(server_network_name)
+        self._server_container_name = server_container_name(self._invocation_instance)
+        self._server_network_name = server_runtime_network_name(self._invocation_instance)
+        self._create_network(self._server_network_name)
         start_server_result = self._command_runner(
             [
                 "docker",
                 "run",
                 "--detach",
                 "--name",
-                server_name,
+                self._server_container_name,
                 "--network",
-                server_network_name,
+                self._server_network_name,
                 "--env",
                 f"{UPDATE_SERVER_BIND_ADDRESS_ENV}={bind_address}",
+                "--env",
+                f"{UPDATE_SERVER_BUNDLE_DIR_ENV}={UPDATE_SERVER_CONTAINER_BUNDLE_DIR}",
+                "--mount",
+                (
+                    "type=bind,"
+                    f"source={DEFAULT_BUNDLE_FILE},"
+                    f"target={UPDATE_SERVER_CONTAINER_BUNDLE_DIR}/{DEFAULT_BUNDLE_FILE.name},"
+                    "readonly"
+                ),
                 PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
             ],
             cwd=self._repo_root,
@@ -96,7 +113,7 @@ class DockerInvocationRunner:
             raise RuntimeSetupError(
                 _docker_error_detail(
                     stderr=start_server_result.stderr,
-                    fallback=f"Docker failed to start runtime-isolated update server {server_name}.",
+                    fallback=f"Docker failed to start runtime-isolated update server {self._server_container_name}.",
                 )
             )
         return service_url(bind_address)
@@ -158,10 +175,12 @@ class DockerInvocationRunner:
         return DockerInvocationSession(
             command_runner=self._command_runner,
             repo_root=self._repo_root,
+            server_container_name=self._server_container_name,
+            server_network_name=self._server_network_name,
             started_client_ids=tuple(started_client_ids),
             container_names_by_client_id=container_names_by_client_id,
             startup_failures=startup_failures,
-            network_name=network_name,
+            client_network_name=network_name,
         )
 
 
@@ -173,17 +192,21 @@ class DockerInvocationSession:
         *,
         command_runner: CommandRunner,
         repo_root: Path,
+        server_container_name: str | None,
+        server_network_name: str | None,
         started_client_ids: tuple[str, ...],
         container_names_by_client_id: dict[str, str],
         startup_failures: dict[str, str],
-        network_name: str,
+        client_network_name: str,
     ) -> None:
         self._command_runner = command_runner
         self._repo_root = repo_root
+        self._server_container_name = server_container_name
+        self._server_network_name = server_network_name
         self._started_client_ids = started_client_ids
         self._container_names_by_client_id = container_names_by_client_id
         self._startup_failures = dict(startup_failures)
-        self._network_name = network_name
+        self._client_network_name = client_network_name
         self._finalization_result: str | None = None
         self._finalized = False
 
@@ -240,11 +263,17 @@ class DockerInvocationSession:
                 container_name=container_name,
                 errors=errors,
             )
-
+        if self._server_container_name != None:
+            self._stop_container(self._server_container_name)
         if not keep_containers:
             for container_name in self._container_names_by_client_id.values():
                 self._remove_container(container_name=container_name, errors=errors)
-            self._remove_network(errors=errors)
+            self._remove_network(network_name=self._client_network_name, errors=errors)
+            if self._server_network_name and self._server_container_name:
+                self._remove_container(
+                    container_name=self._server_container_name, errors=errors
+                )
+                self._remove_network(network_name=self._server_container_name, errors=errors)
 
         self._finalization_result = "; ".join(errors) if errors else None
         self._finalized = True
@@ -285,14 +314,14 @@ class DockerInvocationSession:
                 f"{_docker_error_detail(stderr=remove_result.stderr, fallback='docker rm failed.')}"
             )
 
-    def _remove_network(self, *, errors: list[str]) -> None:
+    def _remove_network(self, *, network_name: str, errors: list[str]) -> None:
         network_remove_result = self._command_runner(
-            ["docker", "network", "rm", self._network_name],
+            ["docker", "network", "rm", network_name],
             cwd=self._repo_root,
         )
         if network_remove_result.returncode != 0:
             errors.append(
-                f"Failed to remove runtime network {self._network_name}: "
+                f"Failed to remove runtime network {self._client_network_name}: "
                 f"{_docker_error_detail(stderr=network_remove_result.stderr, fallback='docker network rm failed.')}"
             )
 

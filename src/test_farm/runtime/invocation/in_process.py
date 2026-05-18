@@ -3,6 +3,7 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Mapping
 
+from test_farm.bundles import create_default_bundle_source
 from test_farm.runtime.invocation_protocol import InvocationSession
 from test_farm.subjects.toy_client import (
     BUNDLE_ID_ENV,

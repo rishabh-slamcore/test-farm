@@ -10,11 +10,11 @@ from typing import Literal, Mapping, TypedDict, cast
 
 import httpx
 
+from test_farm.bundles import create_default_bundle_source, load_default_bundle
 from test_farm.controller import ControllerServer, start_controller_server
 from test_farm.identifiers import expected_client_ids as build_expected_client_ids
 from test_farm.identifiers import invocation_directory_name
 from test_farm.models import (
-    DEFAULT_BUNDLE,
     Bundle,
     BundlePayload,
     ClientOutcome,
@@ -93,27 +93,27 @@ async def execute_invocation(
     )
     started_at = _utc_now()
 
-    async with start_update_server(bind_address=update_server_bind_address) as update_server:
-        try:
-            expected_bundle = await fetch_expected_bundle_from_update_server(
-                update_server_base_url=update_server.base_url,
-                bundle_id=DEFAULT_BUNDLE.bundle_id,
-            )
-        except RuntimeError as invocation_error:
-            return (
-                _write_failed_invocation_result(
-                    results_dir=results_dir,
-                    invocation_instance=invocation_instance,
-                    scenario_file=scenario.scenario_file,
-                    started_at=started_at,
-                    invocation_error={
-                        "stage": "manifest_fetch",
-                        "detail": str(invocation_error),
-                    },
-                ),
-                "failed",
-            )
+    try:
+        expected_bundle = load_default_bundle()
+    except OSError as invocation_error:
+        return (
+            _write_failed_invocation_result(
+                results_dir=results_dir,
+                invocation_instance=invocation_instance,
+                scenario_file=scenario.scenario_file,
+                started_at=started_at,
+                invocation_error={
+                    "stage": "bundle_file_read",
+                    "detail": str(invocation_error),
+                },
+            ),
+            "failed",
+        )
 
+    async with start_update_server(
+        bind_address=update_server_bind_address,
+        bundle_source=create_default_bundle_source(),
+    ) as update_server:
         expected_client_ids = build_expected_client_ids(scenario.client_count)
 
         async with start_controller_server(

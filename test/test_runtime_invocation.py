@@ -5,6 +5,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 
 import pytest
+from pytest import MonkeyPatch
 
 from test_farm.runtime.invocation.docker import DockerInvocationRunner
 from test_farm.runtime.invocation_protocol import RuntimeSetupError
@@ -119,6 +120,54 @@ def test_docker_invocation_runner_attempts_every_expected_client_before_returnin
         ],
         ["docker", "wait", "test-farm-007-client-002"],
         ["docker", "stop", "test-farm-007-client-002"],
+    ]
+
+
+@pytest.mark.usefixtures("docker_available_for_runtime_invocation")
+def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(b"bundle bytes from mounted file\n")
+    observed_calls: list[tuple[list[str], Path]] = []
+
+    def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
+        observed_calls.append((args, cwd))
+        return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
+
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
+
+    update_server_url = asyncio.run(
+        runner.start_update_server(bind_address="192.168.1.10:8081")
+    )
+
+    assert update_server_url == "http://192.168.1.10:8081"
+    assert [args for args, _cwd in observed_calls] == [
+        ["docker", "image", "inspect", "test-farm/toy-update-server-runtime:latest"],
+        ["docker", "network", "create", "test-farm-007-server-network"],
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-update-server",
+            "--network",
+            "test-farm-007-server-network",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS=192.168.1.10:8081",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_BUNDLE_DIR=/test-farm/bundles",
+            "--mount",
+            f"type=bind,source={bundle_file},target=/test-farm/bundles/baseline,readonly",
+            "test-farm/toy-update-server-runtime:latest",
+        ],
     ]
 
 

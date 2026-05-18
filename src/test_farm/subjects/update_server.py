@@ -8,15 +8,17 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
-from test_farm.models import DEFAULT_BUNDLE, DEFAULT_BUNDLE_BYTES
+from test_farm.bundles import BundleSource, InMemoryBundleSource
 
 UPDATE_SERVER_BIND_ADDRESS_ENV = "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS"
+UPDATE_SERVER_BUNDLE_DIR_ENV = "TEST_FARM_UPDATE_SERVER_BUNDLE_DIR"
 
 
-def create_update_server_app() -> FastAPI:
+def create_update_server_app(*, bundle_source: BundleSource | None = None) -> FastAPI:
     """Build the Update Server application."""
 
     app = FastAPI()
+    resolved_bundle_source = InMemoryBundleSource() if bundle_source is None else bundle_source
 
     @app.get("/health")
     async def health() -> JSONResponse:
@@ -24,22 +26,24 @@ def create_update_server_app() -> FastAPI:
 
     @app.get("/bundles/{bundle_id}/manifest")
     async def manifest(bundle_id: str) -> JSONResponse:
-        if bundle_id != DEFAULT_BUNDLE.bundle_id:
+        resolved_bundle = resolved_bundle_source.get_bundle(bundle_id)
+        if resolved_bundle is None:
             return JSONResponse(
                 status_code=404,
                 content={"detail": f"Bundle {bundle_id} was not found."},
             )
-        return JSONResponse(status_code=200, content=DEFAULT_BUNDLE.to_payload())
+        return JSONResponse(status_code=200, content=resolved_bundle.to_payload())
 
     @app.get("/bundles/{bundle_id}")
     async def bundle(bundle_id: str) -> Response:
-        if bundle_id != DEFAULT_BUNDLE.bundle_id:
+        resolved_bundle_bytes = resolved_bundle_source.get_bundle_bytes(bundle_id)
+        if resolved_bundle_bytes is None:
             return JSONResponse(
                 status_code=404,
                 content={"detail": f"Bundle {bundle_id} was not found."},
             )
         return Response(
-            content=DEFAULT_BUNDLE_BYTES,
+            content=resolved_bundle_bytes,
             status_code=200,
             media_type="application/octet-stream",
         )
@@ -50,12 +54,17 @@ def create_update_server_app() -> FastAPI:
 class UpdateServer:
     """Async uvicorn wrapper around the toy Update Server app."""
 
-    def __init__(self, *, bind_address: str) -> None:
+    def __init__(
+        self,
+        *,
+        bind_address: str,
+        bundle_source: BundleSource | None = None,
+    ) -> None:
         host, port = _parse_bind_address(bind_address)
         self.base_url = f"http://{host}:{port}"
         self._server = uvicorn.Server(
             uvicorn.Config(
-                app=create_update_server_app(),
+                app=create_update_server_app(bundle_source=bundle_source),
                 host=host,
                 port=port,
                 log_level="warning",
@@ -101,14 +110,16 @@ class UpdateServer:
         await self.stop()
 
 
-def start_update_server(*, bind_address: str) -> UpdateServer:
+def start_update_server(
+    *, bind_address: str, bundle_source: BundleSource | None = None
+) -> UpdateServer:
     """Create the Update Server for one invocation.
 
     :param bind_address: Bind address in ``host:port`` form.
     :returns: Running Update Server wrapper.
     """
 
-    return UpdateServer(bind_address=bind_address)
+    return UpdateServer(bind_address=bind_address, bundle_source=bundle_source)
 
 
 def _parse_bind_address(bind_address: str) -> tuple[str, int]:

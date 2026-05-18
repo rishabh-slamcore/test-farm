@@ -3,9 +3,15 @@
 import asyncio
 import signal
 from os import environ
+from pathlib import Path
 from typing import Mapping
 
-from test_farm.subjects.update_server import UPDATE_SERVER_BIND_ADDRESS_ENV, UpdateServer
+from test_farm.bundles import FileBackedBundleSource
+from test_farm.subjects.update_server import (
+    UPDATE_SERVER_BIND_ADDRESS_ENV,
+    UPDATE_SERVER_BUNDLE_DIR_ENV,
+    UpdateServer,
+)
 
 
 async def run_update_server(environment: Mapping[str, str] | None = None) -> int:
@@ -17,7 +23,11 @@ async def run_update_server(environment: Mapping[str, str] | None = None) -> int
     try:
         resolved_environment = environ if environment is None else environment
         update_server_bind_address = resolved_environment[UPDATE_SERVER_BIND_ADDRESS_ENV]
-        update_server = UpdateServer(bind_address=update_server_bind_address)
+        bundle_dir = Path(resolved_environment[UPDATE_SERVER_BUNDLE_DIR_ENV])
+        update_server = UpdateServer(
+            bind_address=update_server_bind_address,
+            bundle_source=FileBackedBundleSource(bundle_dir),
+        )
 
         def request_shutdown() -> None:
             nonlocal shutdown_task
