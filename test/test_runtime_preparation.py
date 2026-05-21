@@ -8,11 +8,13 @@ import pytest
 from pytest import MonkeyPatch
 
 from test_farm.runtime.preparation import (
+    PREPARED_ROUTER_IMAGE_TAG,
     PREPARED_TOY_CLIENT_IMAGE_TAG,
     PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
     REPO_ROOT,
     RuntimePreparationError,
     RuntimePreparationResult,
+    prepare_router_runtime,
     prepare_toy_client_runtime,
     prepare_toy_update_server_runtime,
 )
@@ -33,6 +35,13 @@ RUNTIME_CASES = (
         REPO_ROOT / "runtime" / "toy_update_server" / "Dockerfile",
         "Docker CLI is required to prepare the toy-update-server runtime.",
         id="toy-update-server",
+    ),
+    pytest.param(
+        prepare_router_runtime,
+        PREPARED_ROUTER_IMAGE_TAG,
+        REPO_ROOT / "runtime" / "router" / "Dockerfile",
+        "Docker CLI is required to prepare the router runtime.",
+        id="router",
     ),
 )
 

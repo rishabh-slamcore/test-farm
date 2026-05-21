@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from pytest import MonkeyPatch
 
+from test_farm.bundles import FileBackedBundleSource
 from test_farm.identifiers import expected_client_ids
 from test_farm.invocation import execute_invocation
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientOutcome, ClientStatus
@@ -20,8 +21,10 @@ from test_farm.runtime.invocation_protocol import (
 )
 from test_farm.scenario import Scenario
 from test_farm.subjects.toy_client import CLIENT_ID_ENV
+from test_farm.subjects.update_server import UpdateServer
 
 
+@pytest.mark.host_only
 def test_execute_invocation_completes_two_client_baseline_with_real_subjects(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -216,11 +219,12 @@ def test_execute_invocation_derives_expected_bundle_from_default_bundle_file(
         bundle_file,
         raising=False,
     )
+
     monkeypatch.setattr(
-        "test_farm.invocation.start_update_server",
-        lambda **kwargs: _FakeUpdateServer(),
-        raising=False,
+        "test_farm.runtime.invocation.in_process.UpdateServer",
+        lambda bind_address, bundle_source: _FakeUpdateServer(),
     )
+
     monkeypatch.setattr(
         "test_farm.invocation.derive_update_server_bind_address",
         lambda bind_address: reachable_update_server_bind_address,
@@ -1127,10 +1131,10 @@ def _controller_client_outcome(
 class _FakeUpdateServer:
     base_url = "http://update-server.example:8081"
 
-    async def __aenter__(self) -> "_FakeUpdateServer":
+    async def start(self) -> "_FakeUpdateServer":
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def stop(self, exc_type: object, exc: object, traceback: object) -> None:
         del exc_type
         del exc
         del traceback

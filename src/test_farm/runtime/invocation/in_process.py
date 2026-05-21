@@ -26,7 +26,7 @@ class InProcessInvocationRunner:
     async def start_update_server(self, bind_address: str) -> str:
         if self._update_server is not None:
             raise RuntimeError("Server has already started")
-        self._update_server = UpdateServer(bind_address=bind_address)
+        self._update_server = UpdateServer(bind_address=bind_address, bundle_source=None)
         await self._update_server.start()
         return self._update_server.base_url
 

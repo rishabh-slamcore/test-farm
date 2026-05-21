@@ -10,11 +10,14 @@ from test_farm.runtime.command_runner import CommandRunner
 
 PREPARED_TOY_CLIENT_IMAGE_TAG = "test-farm/toy-client-runtime:latest"
 PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG = "test-farm/toy-update-server-runtime:latest"
+PREPARED_ROUTER_IMAGE_TAG = "test-farm/router-runtime:latest"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOY_CLIENT_RUNTIME_ASSETS_DIR = REPO_ROOT / "runtime" / "toy_client"
 TOY_CLIENT_RUNTIME_DOCKERFILE = TOY_CLIENT_RUNTIME_ASSETS_DIR / "Dockerfile"
 TOY_UPDATE_SERVER_RUNTIME_ASSETS_DIR = REPO_ROOT / "runtime" / "toy_update_server"
 TOY_UPDATE_SERVER_RUNTIME_DOCKERFILE = TOY_UPDATE_SERVER_RUNTIME_ASSETS_DIR / "Dockerfile"
+ROUTER_RUNTIME_ASSETS_DIR = REPO_ROOT / "runtime" / "router"
+ROUTER_RUNTIME_DOCKERFILE = ROUTER_RUNTIME_ASSETS_DIR / "Dockerfile"
 
 
 class RuntimePreparationError(RuntimeError):
@@ -52,6 +55,20 @@ def prepare_toy_client_runtime(
         img_name=PREPARED_TOY_CLIENT_IMAGE_TAG,
         runtime_dockerfile=TOY_CLIENT_RUNTIME_DOCKERFILE,
         runtime_name="toy-client",
+        command_runner=command_runner,
+        force_rebuild=force_rebuild,
+    )
+
+
+def prepare_router_runtime(
+    *,
+    command_runner: CommandRunner | None = None,
+    force_rebuild: bool = False,
+) -> RuntimePreparationResult:
+    return _prepare_toy_image_runtime(
+        img_name=PREPARED_ROUTER_IMAGE_TAG,
+        runtime_dockerfile=ROUTER_RUNTIME_DOCKERFILE,
+        runtime_name="router",
         command_runner=command_runner,
         force_rebuild=force_rebuild,
     )

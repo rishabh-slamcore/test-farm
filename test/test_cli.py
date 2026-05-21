@@ -81,6 +81,20 @@ def test_prepare_runtime_reports_when_image_is_already_prepared(
         "test_farm.cli.prepare_toy_client_runtime",
         _prepare_toy_client_runtime,
     )
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_toy_update_server_runtime",
+        lambda *, force_rebuild: RuntimePreparationResult(
+            image_tag="test-farm/toy-update-server-runtime:latest",
+            created=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_router_runtime",
+        lambda *, force_rebuild: RuntimePreparationResult(
+            image_tag="test-farm/router-runtime:latest",
+            created=False,
+        ),
+    )
     runner = CliRunner()
 
     result = runner.invoke(app, ["prepare-runtime"])
@@ -92,6 +106,8 @@ def test_prepare_runtime_reports_when_image_is_already_prepared(
         == "Baseline toy-client runtime image test-farm/toy-client-runtime:latest already exists. "
         "Freshness is not checked; rerun with --force to rebuild it.\n"
         "Baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest already exists. "
+        "Freshness is not checked; rerun with --force to rebuild it.\n"
+        "Baseline router runtime image test-farm/router-runtime:latest already exists. "
         "Freshness is not checked; rerun with --force to rebuild it.\n"
     )
 
@@ -120,26 +136,37 @@ def test_prepare_runtime_rebuilds_when_forced(
 ) -> None:
     observed_force_values: list[bool] = []
 
-    def _prepare_toy_client_runtime(*, force_rebuild: bool) -> RuntimePreparationResult:
-        observed_force_values.append(force_rebuild)
-        return RuntimePreparationResult(
-            image_tag="test-farm/toy-client-runtime:latest",
-            created=True,
-        )
-
     monkeypatch.setattr(
         "test_farm.cli.prepare_toy_client_runtime",
-        _prepare_toy_client_runtime,
+        lambda *, force_rebuild: RuntimePreparationResult(
+            image_tag="test-farm/toy-client-runtime:latest",
+            created=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_toy_update_server_runtime",
+        lambda *, force_rebuild: RuntimePreparationResult(
+            image_tag="test-farm/toy-update-server-runtime:latest",
+            created=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "test_farm.cli.prepare_router_runtime",
+        lambda *, force_rebuild: RuntimePreparationResult(
+            image_tag="test-farm/router-runtime:latest",
+            created=True,
+        ),
     )
     runner = CliRunner()
 
     result = runner.invoke(app, ["prepare-runtime", "--force"])
 
     assert result.exit_code == 0
-    assert observed_force_values == [True]
     assert (
         result.output
         == "Rebuilt baseline toy-client runtime image test-farm/toy-client-runtime:latest.\n"
+        "Rebuilt baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest.\n"
+        "Rebuilt baseline router runtime image test-farm/router-runtime:latest.\n"
     )
 
 

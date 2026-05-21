@@ -16,7 +16,11 @@ from test_farm.models import DEFAULT_BUNDLE, ClientOutcome, ClientStatus
 from test_farm.runtime.invocation.docker import DockerInvocationRunner
 from test_farm.runtime.invocation.in_process import InProcessInvocationRunner
 from test_farm.runtime.invocation_protocol import InvocationRunner
-from test_farm.runtime.preparation import PREPARED_TOY_CLIENT_IMAGE_TAG
+from test_farm.runtime.preparation import (
+    PREPARED_ROUTER_IMAGE_TAG,
+    PREPARED_TOY_CLIENT_IMAGE_TAG,
+    PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
+)
 from test_farm.subjects.update_server import start_update_server
 
 pytestmark = pytest.mark.host_only
@@ -208,17 +212,22 @@ def _skip_if_prepared_docker_runtime_is_unavailable() -> None:
     if which("docker") is None:
         pytest.skip("Docker CLI is unavailable on this host.")
 
-    inspect_result = run(
-        ["docker", "image", "inspect", PREPARED_TOY_CLIENT_IMAGE_TAG],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if inspect_result.returncode != 0:
-        pytest.skip(
-            "Prepared toy-client runtime image is unavailable: "
-            f"{inspect_result.stderr.strip() or inspect_result.stdout.strip() or PREPARED_TOY_CLIENT_IMAGE_TAG}"
+    for image_tag in (
+        PREPARED_TOY_CLIENT_IMAGE_TAG,
+        PREPARED_TOY_UPDATE_SERVER_IMAGE_TAG,
+        PREPARED_ROUTER_IMAGE_TAG,
+    ):
+        inspect_result = run(
+            ["docker", "image", "inspect", image_tag],
+            check=False,
+            capture_output=True,
+            text=True,
         )
+        if inspect_result.returncode != 0:
+            pytest.skip(
+                "Prepared Docker runtime image is unavailable: "
+                f"{inspect_result.stderr.strip() or inspect_result.stdout.strip() or image_tag}"
+            )
 
 
 def _invocation_instance_from_bind_address(bind_address: str) -> int:

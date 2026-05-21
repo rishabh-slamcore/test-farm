@@ -33,7 +33,6 @@ from test_farm.runtime.networking import (
     service_url,
 )
 from test_farm.scenario import Scenario
-from test_farm.subjects.update_server import start_update_server
 
 RESULT_FILE_NAME_PATTERN = re.compile(r"result_(\d+)\.json$")
 INVOCATION_DIRECTORY_NAME_PATTERN = re.compile(r"(\d+)$")
@@ -110,59 +109,56 @@ async def execute_invocation(
             "failed",
         )
 
-    async with start_update_server(
+    update_server_url = await resolved_invocation_runner.start_update_server(
         bind_address=update_server_bind_address,
-        bundle_source=create_default_bundle_source(),
-    ) as update_server:
-        expected_client_ids = build_expected_client_ids(scenario.client_count)
+    )
+    expected_client_ids = build_expected_client_ids(scenario.client_count)
 
-        async with start_controller_server(
-            bind_address=normalized_controller_bind_address,
-            invocation_instance=invocation_instance,
-            expected_client_ids=expected_client_ids,
-            expected_bundle=expected_bundle,
-        ) as controller_server:
-            try:
-                invocation_session = resolved_invocation_runner.start_session(
-                    client_ids=expected_client_ids,
-                    controller_reportback_url=service_url(normalized_controller_bind_address),
-                    update_server_url=update_server.base_url,
-                    bundle_id=expected_bundle.bundle_id,
-                )
-            except RuntimeSetupError as invocation_error:
-                return (
-                    _write_failed_invocation_result(
-                        results_dir=results_dir,
-                        invocation_instance=invocation_instance,
-                        scenario_file=scenario.scenario_file,
-                        started_at=started_at,
-                        expected_bundle=expected_bundle.to_payload(),
-                        invocation_error={
-                            "stage": "runtime_setup",
-                            "detail": str(invocation_error),
-                        },
-                    ),
-                    "failed",
-                )
+    async with start_controller_server(
+        bind_address=normalized_controller_bind_address,
+        invocation_instance=invocation_instance,
+        expected_client_ids=expected_client_ids,
+        expected_bundle=expected_bundle,
+    ) as controller_server:
+        try:
+            invocation_session = resolved_invocation_runner.start_session(
+                client_ids=expected_client_ids,
+                controller_reportback_url=service_url(normalized_controller_bind_address),
+                update_server_url=update_server_url,
+                bundle_id=expected_bundle.bundle_id,
+            )
+        except RuntimeSetupError as invocation_error:
+            return (
+                _write_failed_invocation_result(
+                    results_dir=results_dir,
+                    invocation_instance=invocation_instance,
+                    scenario_file=scenario.scenario_file,
+                    started_at=started_at,
+                    expected_bundle=expected_bundle.to_payload(),
+                    invocation_error={
+                        "stage": "runtime_setup",
+                        "detail": str(invocation_error),
+                    },
+                ),
+                "failed",
+            )
 
-            if invocation_session.startup_failures:
-                await invocation_session.stop_remaining_subjects()
-            else:
-                all_subjects_done_task = asyncio.create_task(
-                    invocation_session.wait_for_subjects()
-                )
-                all_client_outcomes_recorded_task = asyncio.create_task(
-                    controller_server.wait_for_client_outcomes(
-                        scenario.receipt_timeout_seconds
-                    )
-                )
-                await _wait_for_invocation_completion(
-                    invocation_session=invocation_session,
-                    all_subjects_done_task=all_subjects_done_task,
-                    all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
-                    expected_client_ids=expected_client_ids,
-                    controller_server=controller_server,
-                )
+        if invocation_session.startup_failures:
+            await invocation_session.stop_remaining_subjects()
+        else:
+            all_subjects_done_task = asyncio.create_task(
+                invocation_session.wait_for_subjects()
+            )
+            all_client_outcomes_recorded_task = asyncio.create_task(
+                controller_server.wait_for_client_outcomes(scenario.receipt_timeout_seconds)
+            )
+            await _wait_for_invocation_completion(
+                invocation_session=invocation_session,
+                all_subjects_done_task=all_subjects_done_task,
+                all_client_outcomes_recorded_task=all_client_outcomes_recorded_task,
+                expected_client_ids=expected_client_ids,
+                controller_server=controller_server,
+            )
     finished_at = _utc_now()
     invocation_dir = _ensure_invocation_dir(results_dir, invocation_instance)
     client_outcomes = [

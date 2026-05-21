@@ -32,6 +32,12 @@ def server_container_name(invocation_instance: int) -> str:
     return f"test-farm-{invocation_directory_name(invocation_instance)}-update-server"
 
 
+def router_container_name(invocation_instance: int) -> str:
+    """Return the deterministic router container name for one invocation."""
+
+    return f"test-farm-{invocation_directory_name(invocation_instance)}-router"
+
+
 def client_runtime_network_name(invocation_instance: int) -> str:
     """Return the deterministic runtime network name for one invocation."""
 

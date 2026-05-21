@@ -26,7 +26,7 @@ def test_docker_invocation_runner_raises_runtime_setup_error_when_image_inspect_
     with pytest.raises(
         RuntimeSetupError,
         match=(
-            "Baseline toy-client runtime image "
+            "Prepared runtime image "
             "test-farm/toy-client-runtime:latest is missing. "
             "Run `test-farm prepare-runtime` first."
         ),
@@ -141,6 +141,14 @@ def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
         bundle_file,
         raising=False,
     )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker._wait_for_http_health",
+        lambda url: asyncio.sleep(0),
+    )
 
     runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
 
@@ -148,10 +156,34 @@ def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
         runner.start_update_server(bind_address="192.168.1.10:8081")
     )
 
-    assert update_server_url == "http://192.168.1.10:8081"
+    assert update_server_url == "http://10.0.7.2:8081"
     assert [args for args, _cwd in observed_calls] == [
         ["docker", "image", "inspect", "test-farm/toy-update-server-runtime:latest"],
-        ["docker", "network", "create", "test-farm-007-server-network"],
+        ["docker", "image", "inspect", "test-farm/router-runtime:latest"],
+        [
+            "docker",
+            "network",
+            "create",
+            "--subnet",
+            "10.0.7.0/24",
+            "test-farm-007-server-network",
+        ],
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-router",
+            "--network",
+            "test-farm-007-server-network",
+            "--ip",
+            "10.0.7.3",
+            "--cap-add",
+            "NET_ADMIN",
+            "--sysctl",
+            "net.ipv4.ip_forward=1",
+            "test-farm/router-runtime:latest",
+        ],
         [
             "docker",
             "run",
@@ -160,8 +192,12 @@ def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
             "test-farm-007-update-server",
             "--network",
             "test-farm-007-server-network",
+            "--ip",
+            "10.0.7.2",
+            "--cap-add",
+            "NET_ADMIN",
             "--env",
-            "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS=192.168.1.10:8081",
+            "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS=0.0.0.0:8081",
             "--env",
             "TEST_FARM_UPDATE_SERVER_BUNDLE_DIR=/test-farm/bundles",
             "--mount",
@@ -260,7 +296,7 @@ def test_docker_invocation_session_harvests_failed_client_logs_and_removes_runti
         ["docker", "logs", "test-farm-007-client-002"],
         ["docker", "rm", "--force", "test-farm-007-client-001"],
         ["docker", "rm", "--force", "test-farm-007-client-002"],
-        ["docker", "network", "rm", "test-farm-007"],
+        ["docker", "network", "rm", "--force", "test-farm-007"],
     ]
 
 
@@ -342,7 +378,7 @@ def test_docker_invocation_session_finalization_is_best_effort_and_idempotent(
             )
         if args == ["docker", "rm", "--force", "test-farm-007-client-001"]:
             return CompletedProcess(args=args, returncode=1, stdout="", stderr="remove failed")
-        if args == ["docker", "network", "rm", "test-farm-007"]:
+        if args == ["docker", "network", "rm", "--force", "test-farm-007"]:
             return CompletedProcess(
                 args=args, returncode=1, stdout="", stderr="network remove failed"
             )
@@ -380,3 +416,63 @@ def test_docker_invocation_session_finalization_is_best_effort_and_idempotent(
     assert "client-002" in (tmp_path / "007" / "client-002.log").read_text(encoding="utf-8")
     assert "remove failed" in first_error
     assert "network remove failed" in first_error
+
+
+@pytest.mark.usefixtures("docker_available_for_runtime_invocation")
+def test_docker_invocation_session_removes_router_and_server_artifacts_after_routed_run(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_calls: list[tuple[list[str], Path]] = []
+
+    def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
+        observed_calls.append((args, cwd))
+        if args[:3] == ["docker", "image", "inspect"]:
+            return CompletedProcess(args=args, returncode=0, stdout="[]", stderr="")
+        return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
+
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(b"bundle bytes from mounted file\n")
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker._wait_for_http_health",
+        lambda url: asyncio.sleep(0),
+    )
+
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
+    asyncio.run(runner.start_update_server(bind_address="192.168.1.10:8081"))
+    session = runner.start_session(
+        client_ids=("client-001",),
+        controller_reportback_url="http://192.168.1.10:8080",
+        update_server_url="http://10.0.7.2:8081",
+        bundle_id="baseline",
+    )
+
+    asyncio.run(session.wait_for_subjects())
+    finalization_error = asyncio.run(
+        session.finalize(
+            invocation_dir=tmp_path / "007",
+            failed_client_ids=tuple(),
+            keep_containers=False,
+        )
+    )
+
+    assert finalization_error is None
+    assert [args for args, _cwd in observed_calls[-8:]] == [
+        ["docker", "wait", "test-farm-007-client-001"],
+        ["docker", "stop", "test-farm-007-update-server"],
+        ["docker", "stop", "test-farm-007-router"],
+        ["docker", "rm", "--force", "test-farm-007-client-001"],
+        ["docker", "rm", "--force", "test-farm-007-update-server"],
+        ["docker", "rm", "--force", "test-farm-007-router"],
+        ["docker", "network", "rm", "--force", "test-farm-007"],
+        ["docker", "network", "rm", "--force", "test-farm-007-server-network"],
+    ]
