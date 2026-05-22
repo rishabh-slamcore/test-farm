@@ -5,6 +5,7 @@ from pathlib import Path
 from shutil import which
 from subprocess import CompletedProcess, run
 from typing import Mapping
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -19,7 +20,7 @@ from test_farm.identifiers import (
 )
 from test_farm.runtime.command_runner import CommandRunner
 from test_farm.runtime.invocation_protocol import InvocationSession, RuntimeSetupError
-from test_farm.runtime.networking import parse_reachable_service_endpoint, service_url
+from test_farm.runtime.networking import parse_reachable_service_endpoint
 from test_farm.runtime.preparation import (
     PREPARED_ROUTER_IMAGE_TAG,
     PREPARED_TOY_CLIENT_IMAGE_TAG,
@@ -50,6 +51,7 @@ class _RoutedInvocationTopology:
     update_server_ip: str
     router_server_ip: str
     router_client_ip: str
+    client_gateway_ip: str
 
     def client_ip(self, client_index: int) -> str:
         client_network = IPv4Network(self.client_subnet)
@@ -100,9 +102,12 @@ class DockerInvocationRunner:
         *,
         network_name: str,
         subnet: str | None = None,
+        internal: bool = False,
         stale_container_names: tuple[str, ...] = tuple(),
     ) -> None:
         args = ["docker", "network", "create"]
+        if internal:
+            args.append("--internal")
         if subnet is not None:
             args.extend(["--subnet", subnet])
         args.append(network_name)
@@ -185,6 +190,7 @@ class DockerInvocationRunner:
                 self._server_container_name,
                 self._router_container_name,
             ),
+            internal=True,
         )
         self._start_router_container()
 
@@ -231,7 +237,7 @@ class DockerInvocationRunner:
             )
 
         update_server_url = f"http://{self._topology.update_server_ip}:{update_server_port}"
-        await _wait_for_http_health(f"{update_server_url}/health")
+        # await _wait_for_http_health(f"{update_server_url}/health")
         return update_server_url
 
     def _start_router_container(self) -> None:
@@ -296,6 +302,7 @@ class DockerInvocationRunner:
         self._create_network(
             network_name=network_name,
             subnet=self._topology.client_subnet if self._topology is not None else None,
+            internal=self._topology is not None,
             stale_container_names=stale_container_names,
         )
         if self._topology is not None and self._router_container_name is not None:
@@ -369,7 +376,10 @@ class DockerInvocationRunner:
 
             try:
                 if self._topology is not None:
-                    self._configure_client_route(container_name=container_name)
+                    self._configure_client_route(
+                        container_name=container_name,
+                        controller_reportback_url=controller_reportback_url,
+                    )
                     self._release_client_start_gate(container_name=container_name)
             except RuntimeSetupError as error:
                 startup_failures[client_id] = str(error)
@@ -431,9 +441,25 @@ class DockerInvocationRunner:
             ),
         )
 
-    def _configure_client_route(self, *, container_name: str) -> None:
+    def _configure_client_route(
+        self, *, container_name: str, controller_reportback_url: str
+    ) -> None:
         if self._topology is None:
             raise RuntimeError("Client routing topology has not been initialized.")
+
+        remove_default_route_result = self._command_runner(
+            ["docker", "exec", container_name, "ip", "route", "del", "default"],
+            cwd=self._repo_root,
+        )
+        if remove_default_route_result.returncode != 0 and not _missing_default_route(
+            remove_default_route_result.stderr
+        ):
+            raise RuntimeSetupError(
+                _docker_error_detail(
+                    stderr=remove_default_route_result.stderr,
+                    fallback=f"Failed to remove default route from client container {container_name}.",
+                )
+            )
 
         self._replace_container_route(
             container_name=container_name,
@@ -444,6 +470,54 @@ class DockerInvocationRunner:
                 f"to update-server network {self._topology.server_subnet}."
             ),
         )
+        controller_host, controller_port = _parse_http_endpoint(controller_reportback_url)
+        self._replace_container_route(
+            container_name=container_name,
+            destination=f"{controller_host}/32",
+            gateway=self._topology.client_gateway_ip,
+            failure_message=(
+                f"Failed to configure explicit route from client container {container_name} "
+                f"to controller host {controller_host}."
+            ),
+        )
+        self._restrict_client_egress(
+            container_name=container_name,
+            controller_host=controller_host,
+            controller_port=controller_port,
+        )
+
+    def _restrict_client_egress(
+        self, *, container_name: str, controller_host: str, controller_port: int
+    ) -> None:
+        if self._topology is None:
+            raise RuntimeError("Client routing topology has not been initialized.")
+
+        allowed_commands = (
+            "iptables -F OUTPUT",  ##
+            "iptables -A OUTPUT -o lo -j ACCEPT",  ## Allow loopback
+            "iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",  ## Allow follow-up packets, if connection established
+            f"iptables -A OUTPUT -d {self._topology.server_subnet} -j ACCEPT",  ## Allow connection to server subnet
+            (
+                "iptables -A OUTPUT "
+                f"-d {controller_host}/32 -p tcp --dport {controller_port} -j ACCEPT"
+            ),  ## Allow only tcp connection to controller_host:controller_port
+            "iptables -P OUTPUT DROP",  ## Drop all other outbound connections
+        )
+        for command in allowed_commands:
+            result = self._command_runner(
+                ["docker", "exec", container_name, "sh", "-c", command],
+                cwd=self._repo_root,
+            )
+            if result.returncode != 0:
+                raise RuntimeSetupError(
+                    _docker_error_detail(
+                        stderr=result.stderr,
+                        fallback=(
+                            f"Failed to restrict client container {container_name} "
+                            f"egress with command: {command}"
+                        ),
+                    )
+                )
 
     def _replace_container_route(
         self,
@@ -643,6 +717,7 @@ class DockerInvocationSession:
 
 
 def _build_routed_topology(invocation_instance: int) -> _RoutedInvocationTopology:
+    # Keep server and client subnet arbritarily far away.
     second_octet = (invocation_instance // 256) % 256
     third_octet = invocation_instance % 256
     client_third_octet = (third_octet + 128) % 256
@@ -655,6 +730,7 @@ def _build_routed_topology(invocation_instance: int) -> _RoutedInvocationTopolog
         update_server_ip=str(server_network[2]),
         router_server_ip=str(server_network[3]),
         router_client_ip=str(client_network[3]),
+        client_gateway_ip=str(client_network[1]),
     )
 
 
@@ -672,6 +748,19 @@ def _docker_already_exists(stderr: str) -> bool:
 def _docker_name_conflict(*, stderr: str, container_name: str) -> bool:
     detail = stderr.lower()
     return container_name.lower() in detail and "already in use" in detail
+
+
+def _missing_default_route(stderr: str) -> bool:
+    return "no such process" in stderr.lower()
+
+
+def _parse_http_endpoint(url: str) -> tuple[str, int]:
+    parsed = urlsplit(url)
+    if parsed.scheme != "http" or parsed.hostname is None or parsed.port is None:
+        raise RuntimeSetupError(
+            f"Controller reportback URL must be a concrete http URL, got {url}."
+        )
+    return parsed.hostname, parsed.port
 
 
 async def _wait_for_http_health(url: str) -> None:

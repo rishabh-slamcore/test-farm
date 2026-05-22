@@ -208,6 +208,242 @@ def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
 
 
 @pytest.mark.usefixtures("docker_available_for_runtime_invocation")
+def test_docker_invocation_runner_uses_internal_routed_client_network_and_direct_controller_host_route(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_calls: list[tuple[list[str], Path]] = []
+
+    def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
+        observed_calls.append((args, cwd))
+        return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
+
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(b"bundle bytes from mounted file\n")
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker._wait_for_http_health",
+        lambda url: asyncio.sleep(0),
+    )
+
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
+    asyncio.run(runner.start_update_server(bind_address="192.168.1.10:8081"))
+
+    session = runner.start_session(
+        client_ids=("client-001",),
+        controller_reportback_url="http://192.168.1.10:8080",
+        update_server_url="http://10.0.7.2:8081",
+        bundle_id="baseline",
+    )
+
+    assert session.started_client_ids == ("client-001",)
+    assert [args for args, _cwd in observed_calls] == [
+        ["docker", "image", "inspect", "test-farm/toy-update-server-runtime:latest"],
+        ["docker", "image", "inspect", "test-farm/router-runtime:latest"],
+        [
+            "docker",
+            "network",
+            "create",
+            "--subnet",
+            "10.0.7.0/24",
+            "test-farm-007-server-network",
+        ],
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-router",
+            "--network",
+            "test-farm-007-server-network",
+            "--ip",
+            "10.0.7.3",
+            "--cap-add",
+            "NET_ADMIN",
+            "--sysctl",
+            "net.ipv4.ip_forward=1",
+            "test-farm/router-runtime:latest",
+        ],
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-update-server",
+            "--network",
+            "test-farm-007-server-network",
+            "--ip",
+            "10.0.7.2",
+            "--cap-add",
+            "NET_ADMIN",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_BIND_ADDRESS=0.0.0.0:8081",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_BUNDLE_DIR=/test-farm/bundles",
+            "--mount",
+            f"type=bind,source={bundle_file},target=/test-farm/bundles/baseline,readonly",
+            "test-farm/toy-update-server-runtime:latest",
+        ],
+        ["docker", "image", "inspect", "test-farm/toy-client-runtime:latest"],
+        [
+            "docker",
+            "network",
+            "create",
+            "--internal",
+            "--subnet",
+            "10.0.135.0/24",
+            "test-farm-007",
+        ],
+        [
+            "docker",
+            "network",
+            "connect",
+            "--ip",
+            "10.0.135.3",
+            "test-farm-007",
+            "test-farm-007-router",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-update-server",
+            "ip",
+            "route",
+            "replace",
+            "10.0.135.0/24",
+            "via",
+            "10.0.7.3",
+        ],
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-client-001",
+            "--network",
+            "test-farm-007",
+            "--ip",
+            "10.0.135.10",
+            "--cap-add",
+            "NET_ADMIN",
+            "--env",
+            "TEST_FARM_INVOCATION_INSTANCE=7",
+            "--env",
+            "TEST_FARM_CLIENT_ID=client-001",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_URL=http://10.0.7.2:8081",
+            "--env",
+            "TEST_FARM_CONTROLLER_REPORTBACK_URL=http://192.168.1.10:8080",
+            "--env",
+            "TEST_FARM_BUNDLE_ID=baseline",
+            "--entrypoint",
+            "sh",
+            "test-farm/toy-client-runtime:latest",
+            "-c",
+            (
+                "while [ ! -f /tmp/test-farm-start ]; do sleep 0.05; done; "
+                "exec python -m test_farm.subjects.toy_client_runtime"
+            ),
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "ip",
+            "route",
+            "del",
+            "default",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "ip",
+            "route",
+            "replace",
+            "10.0.7.0/24",
+            "via",
+            "10.0.135.3",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "ip",
+            "route",
+            "replace",
+            "192.168.1.10/32",
+            "via",
+            "10.0.135.1",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -F OUTPUT",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -A OUTPUT -o lo -j ACCEPT",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -A OUTPUT -d 10.0.7.0/24 -j ACCEPT",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -A OUTPUT -d 192.168.1.10/32 -p tcp --dport 8080 -j ACCEPT",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "iptables -P OUTPUT DROP",
+        ],
+        [
+            "docker",
+            "exec",
+            "test-farm-007-client-001",
+            "sh",
+            "-c",
+            "touch /tmp/test-farm-start",
+        ],
+    ]
+
+
+@pytest.mark.usefixtures("docker_available_for_runtime_invocation")
 def test_docker_invocation_session_harvests_failed_client_logs_and_removes_runtime_artifacts_by_default(
     tmp_path: Path,
 ) -> None:
