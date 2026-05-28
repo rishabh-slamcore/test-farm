@@ -22,8 +22,8 @@ Primary audience: **Slamcore engineers** validating broadcast-server changes and
 - Single-host **Controller** driven as a **one-shot CLI**:
   `test-farm run scenario.yaml` → provision clients → execute scenario → report → tear down.
 - **Toy HTTP server** as the update source, so the orchestration and impairment machinery can be validated independently of Hawkbit.
-- **Per-client network impairment** via `tc` / `qdisc` / `veth`: fixed and distributional latency, random and correlated loss, reordering, duplication, corruption, and bandwidth caps.
-- **YAML scenario files** describing a time-based sequence of actions: stop, start, restart-after-delay, apply bandwidth limit, apply latency/loss, clear impairments.
+- **Fleet-wide static network impairment** at the **Router Container** via `tc` / `netem` / `tbf`: start with delay, loss, and bandwidth caps, then extend the same model to the remaining impairment options.
+- **YAML scenario files** with baseline invocation fields plus an optional nested `network_impairment` mapping. Omitting `network_impairment` produces a baseline result with no intentional impairment.
 - **Streamed per-client logs** to the operator during the run, plus a final machine-readable report.
 
 ## Post-v1 Direction
@@ -51,7 +51,7 @@ Primary audience: **Slamcore engineers** validating broadcast-server changes and
 
 ## Open Questions
 
-- **Reporting format.** Undecided. Whatever is chosen must be machine-readable, per-client, and record the impairments applied during the run.
+- **Reporting format.** Undecided. Whatever is chosen must be machine-readable and per-client.
 - **v1 scale target.** The design doc suggests "5+ clients hopefully". A concrete upper bound is deferred until host constraints are measured.
 - **LXD viability for multi-host.** An assumption to validate before the Hawkbit phase.
 - **Privilege model.** `tc`, `veth`, and `netns` require root or `CAP_NET_ADMIN`. How the Controller acquires them is deferred.

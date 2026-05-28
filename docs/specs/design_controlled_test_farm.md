@@ -127,7 +127,7 @@ If all clients run as processes in the host network namespace sharing the same h
 Introduce a **Controller** component responsible for orchestrating the test environment. Core responsibilities:
 
 - Provisioning and managing the required number of client instances
-- Applying pre-decided network impairment rules to individual clients
+- Applying pre-decided fleet-wide network impairment rules at the router container
 - Triggering the update broadcast process
 - Collecting and reporting metrics on successful and failed executions
 
@@ -158,17 +158,25 @@ Build a lightweight prototype using toy HTTP servers. This prototype can exercis
 
 ---
 
-## Extension
+## Scenario File Direction
 
-As a desirable extension, the Controller should support reading a **YAML scenario file** that defines a time-based sequence of actions. Example actions:
+The next **Scenario File** expansion should use an optional nested `network_impairment` mapping for static fleet-wide impairment at the router container.
 
-- Stopping a client
-- Starting a client
-- Restarting a client after a specified delay
-- Restricting a client's bandwidth for a fixed duration
-- Introducing temporary latency or packet loss
+The first stage should cover:
 
-Supporting multiple YAML scenario definitions makes it straightforward to express and replay failure cases such as `node_drop_off`, `node_timeout`, and similar reliability scenarios — improving reproducibility and reducing setup effort for exploratory tests.
+- Delay
+- Loss
+- Bandwidth limit
+
+A second stage can extend the same nested mapping with:
+
+- Jitter and delay distribution
+- Loss correlation
+- Reordering
+- Duplication
+- Corruption
+
+Time-based action sequences are out of scope for this direction.
 
 ---
 
@@ -241,4 +249,3 @@ validating broadcast reliability under general network stress, uniform impairmen
 is sufficient.
 
 ---
-

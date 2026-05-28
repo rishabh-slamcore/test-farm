@@ -14,6 +14,19 @@ from test_farm.runtime.preparation import (
     prepare_toy_update_server_runtime,
 )
 from test_farm.scenario import ScenarioFileError, load_scenario_file
+import logging
+import sys
+
+def configure_logging(verbose: bool = False) -> None:
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        stream=sys.stderr,
+        format="%(levelname).1s%(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s",
+        datefmt="%m%d %H:%M:%S",
+        force=True,
+    )
+
 
 app = typer.Typer(help="Controlled update-broadcast test harness.")
 
@@ -36,10 +49,10 @@ def run(
     ),
     results_dir: Path = typer.Option(
         Path("results"), "--results-dir", file_okay=False, resolve_path=True
-    ),
+    )
 ) -> None:
     """Run the current baseline invocation slice."""
-
+    configure_logging(verbose=True)
     try:
         parse_reachable_service_endpoint(controller_bind_address)
     except ValueError as error:

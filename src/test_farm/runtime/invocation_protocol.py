@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping, Protocol
 
+from test_farm.network_impairment import NetworkImpairment
+
 
 class RuntimeSetupError(RuntimeError):
     """Raised when runtime setup fails before any client launch."""
@@ -55,6 +57,7 @@ class InvocationRunner(Protocol):
         controller_reportback_url: str,
         update_server_url: str,
         bundle_id: str,
+        network_impairment: NetworkImpairment | None = None,
     ) -> InvocationSession:
         """Start the invocation runtime session."""
         raise NotImplementedError

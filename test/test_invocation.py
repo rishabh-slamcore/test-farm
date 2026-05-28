@@ -19,7 +19,7 @@ from test_farm.runtime.invocation_protocol import (
     InvocationSession,
     RuntimeSetupError,
 )
-from test_farm.scenario import Scenario
+from test_farm.scenario import NetworkImpairment, Scenario
 from test_farm.subjects.toy_client import CLIENT_ID_ENV
 from test_farm.subjects.update_server import UpdateServer
 
@@ -195,6 +195,97 @@ def test_execute_invocation_records_multi_client_success_payload_and_launches_ea
             "error_detail": None,
         },
     ]
+
+
+def test_execute_invocation_passes_network_impairment_to_invocation_runner(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    reachable_bind_address = "192.168.1.10:8080"
+    reachable_update_server_bind_address = "192.168.1.10:8081"
+    observed_network_impairments: list[NetworkImpairment | None] = []
+    scenario = Scenario(
+        scenario_file=tmp_path / "impaired.yaml",
+        client_count=1,
+        receipt_timeout_seconds=2.0,
+        network_impairment=NetworkImpairment(
+            delay="100ms",
+            loss=5.0,
+            bandwidth_limit="1mbit",
+        ),
+    )
+
+    _patch_fake_update_server(
+        monkeypatch,
+        reachable_update_server_bind_address=reachable_update_server_bind_address,
+        manifest_bundle=DEFAULT_BUNDLE,
+    )
+    _patch_fake_controller_server(
+        monkeypatch,
+        _FakeControllerServer(
+            wait_for_client_outcomes=_return_true,
+            client_outcomes={
+                "client-001": _controller_client_outcome(
+                    client_id="client-001",
+                    client_status=ClientStatus.SUCCESS,
+                )
+            },
+        ),
+    )
+
+    class _ObservingSession:
+        started_client_ids = ("client-001",)
+        startup_failures: dict[str, str] = {}
+
+        async def wait_for_subjects(self) -> None:
+            return None
+
+        async def stop_remaining_subjects(self) -> None:
+            return None
+
+        async def finalize(
+            self,
+            *,
+            invocation_dir: Path,
+            failed_client_ids: tuple[str, ...],
+            keep_containers: bool,
+        ) -> str | None:
+            del invocation_dir
+            del failed_client_ids
+            del keep_containers
+            return None
+
+    class _ObservingRunner:
+        async def start_update_server(self, *, bind_address: str) -> str:
+            del bind_address
+            return f"http://{reachable_update_server_bind_address}"
+
+        def start_session(
+            self,
+            *,
+            client_ids: tuple[str, ...],
+            controller_reportback_url: str,
+            update_server_url: str,
+            bundle_id: str,
+            network_impairment: NetworkImpairment | None,
+        ) -> _ObservingSession:
+            del client_ids
+            del controller_reportback_url
+            del update_server_url
+            del bundle_id
+            observed_network_impairments.append(network_impairment)
+            return _ObservingSession()
+
+    result_file, invocation_status = execute_invocation_sync(
+        scenario=scenario,
+        controller_bind_address=reachable_bind_address,
+        results_dir=tmp_path / "results",
+        invocation_runner=_ObservingRunner(),
+    )
+
+    assert result_file.exists()
+    assert invocation_status == "success"
+    assert observed_network_impairments == [scenario.network_impairment]
 
 
 def test_execute_invocation_derives_expected_bundle_from_default_bundle_file(
@@ -634,11 +725,13 @@ def test_execute_invocation_writes_top_level_runtime_setup_failure(
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
+            network_impairment: NetworkImpairment | None = None,
         ) -> InvocationSession:
             del client_ids
             del controller_reportback_url
             del update_server_url
             del bundle_id
+            del network_impairment
             raise RuntimeSetupError("Prepared runtime image is missing.")
 
     result_file, invocation_status = execute_invocation_sync(
@@ -724,10 +817,12 @@ def test_execute_invocation_reports_startup_failed_without_overwriting_controlle
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
+            network_impairment: NetworkImpairment | None = None,
         ) -> _StartupFailingSession:
             del controller_reportback_url
             del update_server_url
             del bundle_id
+            del network_impairment
             observed_client_id_batches.append(client_ids)
             return _StartupFailingSession()
 
@@ -818,11 +913,13 @@ def test_execute_invocation_marks_invocation_failed_when_runtime_finalization_fa
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
+            network_impairment: NetworkImpairment | None = None,
         ) -> _FinalizationFailingSession:
             del client_ids
             del controller_reportback_url
             del update_server_url
             del bundle_id
+            del network_impairment
             return _FinalizationFailingSession()
 
     result_file, invocation_status = execute_invocation_sync(

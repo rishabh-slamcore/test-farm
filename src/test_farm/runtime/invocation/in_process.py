@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Mapping
 
 from test_farm.bundles import create_default_bundle_source
+from test_farm.network_impairment import NetworkImpairment
 from test_farm.runtime.invocation_protocol import InvocationSession
 from test_farm.subjects.toy_client import (
     BUNDLE_ID_ENV,
@@ -37,7 +38,9 @@ class InProcessInvocationRunner:
         controller_reportback_url: str,
         update_server_url: str,
         bundle_id: str,
+        network_impairment: NetworkImpairment | None = None,
     ) -> InvocationSession:
+        del network_impairment
         tasks: dict[str, asyncio.Task[int]] = {}
         for client_id in client_ids:
             tasks[client_id] = asyncio.create_task(

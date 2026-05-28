@@ -39,7 +39,7 @@ All four quality gates (`black`, `isort`, `mypy`, `pytest`) must pass before any
 
 ### Scenario files
 
-**PyYAML** for parsing + **pydantic** for schema validation. Scenario files must fail loudly with field-level errors on malformed input — never silently default or skip unknown keys.
+**PyYAML** for parsing + **pydantic** for schema validation. Scenario files contain baseline invocation fields plus an optional nested `network_impairment` mapping for static fleet-wide router impairment. They must fail loudly with field-level errors on malformed input — never silently default or skip unknown keys.
 
 ### Toy update server (v1)
 
@@ -58,7 +58,7 @@ v1 drives Docker via `subprocess` + the `docker` CLI (no Python SDK dependency).
 
 ## Network Impairment
 
-`tc` with `netem` and `tbf` qdiscs on per-client veth interfaces. The invocation mechanism is **deferred**: prototype with `subprocess` calls to the `tc` CLI; revisit `pyroute2` if shelling out becomes a bottleneck or a correctness risk.
+`tc` with `netem` and `tbf` qdiscs on the **Router Container** client-facing interface. The initial static profile covers `delay`, `loss`, and `bandwidth_limit`; follow-on sub-fields can extend the same nested mapping with jitter/distribution, correlated loss, reordering, duplication, and corruption. The invocation mechanism is **deferred**: prototype with `subprocess` calls to the `tc` CLI; revisit `pyroute2` if shelling out becomes a bottleneck or a correctness risk.
 
 ## Privileges
 
@@ -70,7 +70,8 @@ Format is **deferred**. Whatever is chosen must be:
 
 - **Machine-readable** — consumable by CI and scripts without post-processing.
 - **Per-client** — each client's outcome, timings, and failure mode recorded individually.
-- **Impairment-aware** — records exactly what impairments were applied, and when, during the run.
+
+The **Result File** does not need to restate the **Scenario File**'s impairment settings.
 
 Streamed human-readable logs during a run are a **v1 requirement**; they supplement, not replace, the final report.
 

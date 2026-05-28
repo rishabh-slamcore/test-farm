@@ -7,8 +7,10 @@ from subprocess import CompletedProcess
 import pytest
 from pytest import MonkeyPatch
 
+from test_farm.network_impairment import router_tc_commands
 from test_farm.runtime.invocation.docker import DockerInvocationRunner
 from test_farm.runtime.invocation_protocol import RuntimeSetupError
+from test_farm.scenario import NetworkImpairment
 
 
 @pytest.mark.usefixtures("docker_available_for_runtime_invocation")
@@ -164,6 +166,7 @@ def test_docker_invocation_runner_starts_update_server_with_bundle_file_mount(
             "docker",
             "network",
             "create",
+            "--internal",
             "--subnet",
             "10.0.7.0/24",
             "test-farm-007-server-network",
@@ -252,6 +255,7 @@ def test_docker_invocation_runner_uses_internal_routed_client_network_and_direct
             "docker",
             "network",
             "create",
+            "--internal",
             "--subnet",
             "10.0.7.0/24",
             "test-farm-007-server-network",
@@ -441,6 +445,191 @@ def test_docker_invocation_runner_uses_internal_routed_client_network_and_direct
             "touch /tmp/test-farm-start",
         ],
     ]
+
+
+@pytest.mark.usefixtures("docker_available_for_runtime_invocation")
+def test_docker_invocation_runner_applies_router_network_impairment_before_starting_clients(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_calls: list[tuple[list[str], Path]] = []
+
+    def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
+        observed_calls.append((args, cwd))
+        return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
+
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(b"bundle bytes from mounted file\n")
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker._wait_for_http_health",
+        lambda url: asyncio.sleep(0),
+    )
+
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
+    asyncio.run(runner.start_update_server(bind_address="192.168.1.10:8081"))
+
+    session = runner.start_session(
+        client_ids=("client-001",),
+        controller_reportback_url="http://192.168.1.10:8080",
+        update_server_url="http://10.0.7.2:8081",
+        bundle_id="baseline",
+        network_impairment=NetworkImpairment(delay="100ms", loss=5.0),
+    )
+
+    router_impairment_call = [
+        args
+        for args, _cwd in observed_calls
+        if args[:4] == ["docker", "exec", "test-farm-007-router", "sh"]
+        and "tc qdisc add dev eth1 root netem delay 100ms loss 5%" in args[-1]
+    ]
+    client_run_calls = [
+        args
+        for args, _cwd in observed_calls
+        if args[:4] == ["docker", "run", "--detach", "--name"]
+        and "test-farm-007-client-001" in args
+    ]
+
+    assert session.started_client_ids == ("client-001",)
+    assert router_impairment_call == [
+        [
+            "docker",
+            "exec",
+            "test-farm-007-router",
+            "sh",
+            "-c",
+            "tc qdisc add dev eth1 root netem delay 100ms loss 5%",
+        ]
+    ]
+    assert client_run_calls == [
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            "test-farm-007-client-001",
+            "--network",
+            "test-farm-007",
+            "--ip",
+            "10.0.135.10",
+            "--cap-add",
+            "NET_ADMIN",
+            "--env",
+            "TEST_FARM_INVOCATION_INSTANCE=7",
+            "--env",
+            "TEST_FARM_CLIENT_ID=client-001",
+            "--env",
+            "TEST_FARM_UPDATE_SERVER_URL=http://10.0.7.2:8081",
+            "--env",
+            "TEST_FARM_CONTROLLER_REPORTBACK_URL=http://192.168.1.10:8080",
+            "--env",
+            "TEST_FARM_BUNDLE_ID=baseline",
+            "--entrypoint",
+            "sh",
+            "test-farm/toy-client-runtime:latest",
+            "-c",
+            (
+                "while [ ! -f /tmp/test-farm-start ]; do sleep 0.05; done; "
+                "exec python -m test_farm.subjects.toy_client_runtime"
+            ),
+        ]
+    ]
+    assert observed_calls.index(
+        (router_impairment_call[0], runner._repo_root)
+    ) < observed_calls.index((client_run_calls[0], runner._repo_root))
+
+
+@pytest.mark.usefixtures("docker_available_for_runtime_invocation")
+def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_impairment(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    observed_calls: list[tuple[list[str], Path]] = []
+
+    def _command_runner(args: list[str], *, cwd: Path) -> CompletedProcess[str]:
+        observed_calls.append((args, cwd))
+        return CompletedProcess(args=args, returncode=0, stdout="container-id\n", stderr="")
+
+    bundle_file = tmp_path / "baseline"
+    bundle_file.write_bytes(b"bundle bytes from mounted file\n")
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker.DEFAULT_BUNDLE_FILE",
+        bundle_file,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "test_farm.runtime.invocation.docker._wait_for_http_health",
+        lambda url: asyncio.sleep(0),
+    )
+
+    runner = DockerInvocationRunner(invocation_instance=7, command_runner=_command_runner)
+    asyncio.run(runner.start_update_server(bind_address="192.168.1.10:8081"))
+
+    session = runner.start_session(
+        client_ids=("client-001",),
+        controller_reportback_url="http://192.168.1.10:8080",
+        update_server_url="http://10.0.7.2:8081",
+        bundle_id="baseline",
+        network_impairment=NetworkImpairment(
+            delay="100ms",
+            loss=5.0,
+            bandwidth_limit="1mbit",
+        ),
+    )
+
+    router_impairment_call = [
+        args
+        for args, _cwd in observed_calls
+        if args[:4] == ["docker", "exec", "test-farm-007-router", "sh"]
+        and args[-1]
+        == (
+            "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit\n"
+            "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
+        )
+    ]
+
+    assert session.started_client_ids == ("client-001",)
+    assert router_impairment_call == [
+        [
+            "docker",
+            "exec",
+            "test-farm-007-router",
+            "sh",
+            "-c",
+            (
+                "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit\n"
+                "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
+            ),
+        ]
+    ]
+
+
+def test_router_tc_commands_chain_tbf_before_netem_for_bandwidth_limited_impairment() -> None:
+    commands = router_tc_commands(
+        network_impairment=NetworkImpairment(
+            delay="100ms",
+            loss=5.0,
+            bandwidth_limit="1mbit",
+        ),
+        interface_name="eth1",
+    )
+
+    assert commands == (
+        "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit",
+        "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%",
+    )
 
 
 @pytest.mark.usefixtures("docker_available_for_runtime_invocation")

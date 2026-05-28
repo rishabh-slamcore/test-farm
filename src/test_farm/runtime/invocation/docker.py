@@ -8,6 +8,7 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 import httpx
+import logging
 
 from test_farm.bundles import DEFAULT_BUNDLE_FILE
 from test_farm.identifiers import (
@@ -18,6 +19,7 @@ from test_farm.identifiers import (
     server_container_name,
     server_runtime_network_name,
 )
+from test_farm.network_impairment import NetworkImpairment, router_tc_commands
 from test_farm.runtime.command_runner import CommandRunner
 from test_farm.runtime.invocation_protocol import InvocationSession, RuntimeSetupError
 from test_farm.runtime.networking import parse_reachable_service_endpoint
@@ -42,7 +44,8 @@ from test_farm.subjects.update_server import (
 UPDATE_SERVER_CONTAINER_BUNDLE_DIR = "/test-farm/bundles"
 CLIENT_START_GATE_FILE = "/tmp/test-farm-start"
 SERVER_HEALTH_TIMEOUT_SECONDS = 5.0
-
+ROUTER_CLIENT_INTERFACE_NAME = "eth1"
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class _RoutedInvocationTopology:
@@ -182,7 +185,7 @@ class DockerInvocationRunner:
         self._server_container_name = server_container_name(self._invocation_instance)
         self._server_network_name = server_runtime_network_name(self._invocation_instance)
         self._router_container_name = router_container_name(self._invocation_instance)
-
+        
         self._create_network(
             network_name=self._server_network_name,
             subnet=self._topology.server_subnet,
@@ -193,6 +196,7 @@ class DockerInvocationRunner:
             internal=True,
         )
         self._start_router_container()
+        #logger.info(f"Started router container: {self._router_container_name}")
 
         update_server_port = controller_endpoint.port
         update_server_bind_address = f"0.0.0.0:{update_server_port}"
@@ -235,7 +239,7 @@ class DockerInvocationRunner:
                     ),
                 )
             )
-
+        #logger.info(f"Started update server: {self._server_container_name}")
         update_server_url = f"http://{self._topology.update_server_ip}:{update_server_port}"
         # await _wait_for_http_health(f"{update_server_url}/health")
         return update_server_url
@@ -284,6 +288,7 @@ class DockerInvocationRunner:
         controller_reportback_url: str,
         update_server_url: str,
         bundle_id: str,
+        network_impairment: NetworkImpairment | None = None,
     ) -> InvocationSession:
         self._check_image_exists(PREPARED_TOY_CLIENT_IMAGE_TAG)
 
@@ -308,6 +313,7 @@ class DockerInvocationRunner:
         if self._topology is not None and self._router_container_name is not None:
             self._connect_router_to_client_network(network_name=network_name)
             self._configure_update_server_route()
+            self._apply_router_network_impairment(network_impairment=network_impairment)
 
         for client_index, client_id in enumerate(client_ids, start=1):
             container_name = runtime_container_name(
@@ -381,12 +387,15 @@ class DockerInvocationRunner:
                         controller_reportback_url=controller_reportback_url,
                     )
                     self._release_client_start_gate(container_name=container_name)
+                    #logger.info(f"Started client: {container_name}")
             except RuntimeSetupError as error:
                 startup_failures[client_id] = str(error)
                 continue
 
             started_client_ids.append(client_id)
             container_names_by_client_id[client_id] = container_name
+
+    
 
         return DockerInvocationSession(
             command_runner=self._command_runner,
@@ -440,6 +449,44 @@ class DockerInvocationRunner:
                 f"{self._server_container_name} to client network {self._topology.client_subnet}."
             ),
         )
+
+    def _apply_router_network_impairment(
+        self,
+        *,
+        network_impairment: NetworkImpairment | None,
+    ) -> None:
+        if network_impairment is None:
+            return
+        if self._router_container_name is None:
+            raise RuntimeError("Router topology has not been initialized.")
+
+        command_script = "\n".join(
+            router_tc_commands(
+                network_impairment=network_impairment,
+                interface_name=ROUTER_CLIENT_INTERFACE_NAME,
+            )
+        )
+        apply_result = self._command_runner(
+            [
+                "docker",
+                "exec",
+                self._router_container_name,
+                "sh",
+                "-c",
+                command_script,
+            ],
+            cwd=self._repo_root,
+        )
+        if apply_result.returncode != 0:
+            raise RuntimeSetupError(
+                _docker_error_detail(
+                    stderr=apply_result.stderr,
+                    fallback=(
+                        f"Failed to apply router network_impairment to "
+                        f"{self._router_container_name}."
+                    ),
+                )
+            )
 
     def _configure_client_route(
         self, *, container_name: str, controller_reportback_url: str

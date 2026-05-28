@@ -126,6 +126,7 @@ async def execute_invocation(
                 controller_reportback_url=service_url(normalized_controller_bind_address),
                 update_server_url=update_server_url,
                 bundle_id=expected_bundle.bundle_id,
+                network_impairment=scenario.network_impairment,
             )
         except RuntimeSetupError as invocation_error:
             return (

@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from test_farm.cli import app
 from test_farm.runtime.preparation import RuntimePreparationError, RuntimePreparationResult
-from test_farm.scenario import Scenario
+from test_farm.scenario import Scenario, load_scenario_file
 
 
 @pytest.mark.parametrize(
@@ -17,7 +17,7 @@ from test_farm.scenario import Scenario
         ("not: [valid yaml\n", "is not valid YAML"),
         (
             "- client_count: 1\n",
-            "must contain a mapping with only client_count and receipt_timeout_seconds",
+            "must contain a mapping with only client_count, receipt_timeout_seconds, and optional network_impairment",
         ),
         ("{}\n", "is missing required field client_count"),
         ("client_count: 1\n", "is missing required field receipt_timeout_seconds"),
@@ -36,6 +36,37 @@ from test_farm.scenario import Scenario
         (
             "client_count: 1\nreceipt_timeout_seconds: true\n",
             "must set receipt_timeout_seconds to a non-negative number",
+        ),
+        (
+            "client_count: 1\nreceipt_timeout_seconds: 0\nnetwork_impairment: []\n",
+            "must set network_impairment to a mapping",
+        ),
+        (
+            (
+                "client_count: 1\n"
+                "receipt_timeout_seconds: 0\n"
+                "network_impairment:\n"
+                "  jitter: 20ms\n"
+            ),
+            "contains unknown network_impairment fields: jitter",
+        ),
+        (
+            (
+                "client_count: 1\n"
+                "receipt_timeout_seconds: 0\n"
+                "network_impairment:\n"
+                "  delay: 100\n"
+            ),
+            "must set network_impairment.delay to a duration like 100ms",
+        ),
+        (
+            (
+                "client_count: 1\n"
+                "receipt_timeout_seconds: 0\n"
+                "network_impairment:\n"
+                "  loss: 101\n"
+            ),
+            "must set network_impairment.loss to a percentage between 0 and 100",
         ),
     ],
 )
@@ -63,6 +94,42 @@ def test_run_exits_with_code_2_for_invalid_scenario_files(
     assert expected_error in result.stderr
     assert str(scenario_file) in result.stderr
     assert not (tmp_path / "results").exists()
+
+
+def test_load_scenario_file_defaults_network_impairment_to_none(tmp_path: Path) -> None:
+    scenario_file = tmp_path / "baseline.yaml"
+    scenario_file.write_text(
+        "client_count: 1\nreceipt_timeout_seconds: 0\n",
+        encoding="utf-8",
+    )
+
+    scenario = load_scenario_file(scenario_file)
+
+    assert scenario.network_impairment is None
+
+
+def test_load_scenario_file_parses_supported_router_network_impairment(
+    tmp_path: Path,
+) -> None:
+    scenario_file = tmp_path / "impaired.yaml"
+    scenario_file.write_text(
+        (
+            "client_count: 2\n"
+            "receipt_timeout_seconds: 1.5\n"
+            "network_impairment:\n"
+            "  delay: 100ms\n"
+            "  loss: 5\n"
+            "  bandwidth_limit: 1mbit\n"
+        ),
+        encoding="utf-8",
+    )
+
+    scenario = load_scenario_file(scenario_file)
+
+    assert scenario.network_impairment is not None
+    assert scenario.network_impairment.delay == "100ms"
+    assert scenario.network_impairment.loss == 5.0
+    assert scenario.network_impairment.bandwidth_limit == "1mbit"
 
 
 def test_prepare_runtime_reports_when_image_is_already_prepared(

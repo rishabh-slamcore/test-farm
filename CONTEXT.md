@@ -85,7 +85,11 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - **Client IDs** are Controller-generated from the requested client count as `client-001`, `client-002`, and so on.
 - A **Receipt** identifies the **invocation_instance**, **Client ID**, and **Bundle ID** it belongs to.
 - The v1 **Bundle ID** is required and defaults to `baseline`.
-- The v1 **Scenario File** declares only the client count; bundle size and checksum come from the Update Server manifest.
+- A baseline **Scenario File** declares `client_count` and `receipt_timeout_seconds`.
+- An impaired **Scenario File** may additionally declare an optional `network_impairment` mapping for static fleet-wide impairment at the **Router Container**.
+- The initial `network_impairment` subset covers `delay`, `loss`, and `bandwidth_limit`; later sub-fields may extend the same nested mapping.
+- When `network_impairment` is absent, the **Scenario File** applies no intentional impairment and can produce a **baseline result**.
+- Bundle size and checksum come from the Update Server manifest, not from the **Scenario File**.
 - The Controller passes invocation_instance, Client ID, Update Server URL, the **Controller Reportback URL** derived from the **Controller Bind Address**, and Bundle ID to each client container as environment variables.
 - Milestone 1 requires an explicit **Controller Bind Address**.
 - The Controller and Update Server expose `GET /health` for readiness and debugging.
@@ -98,7 +102,8 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - An **Update Server** provides the bundle that clients use to produce a **Receipt**.
 - A **Router Container** connects the Update Server network and client network using **Explicit Routing**.
 - A **Router Container** applies impairment uniformly to client-bound update traffic.
-- Milestone 1 includes the **Router Container** for forwarding but performs no `tc` operations.
+- The first **baseline result** milestone includes the **Router Container** for forwarding but performs no `tc` operations.
+- Static network impairment is applied at the **Router Container**, not independently per client.
 - Milestone 1 uses separate runtime images/containers for the Router Container, Update Server, and client.
 - The Controller remains a host-side process in Milestone 1.
 
@@ -161,6 +166,9 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 > **Dev:** "Should the first baseline result configure `tc` even without impairment?"
 > **Domain expert:** "No — Milestone 1 proves routing and verification only; `tc` starts in the impairment milestone."
 
+> **Dev:** "Should every Scenario File declare network impairment settings?"
+> **Domain expert:** "No — `network_impairment` is optional. Omit it when you want a **baseline result**."
+
 > **Dev:** "Can the toy Update Server and client share one image?"
 > **Domain expert:** "No — keep router, Update Server, and client as separate runtime images so later replacements stay clean."
 
@@ -170,7 +178,7 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - "run" was used for a `test-farm run` execution; resolved: use **invocation**.
 - "run id" could mean a timestamp, UUID, random identifier, or hidden state counter; resolved: use **invocation_instance**, allocated by scanning **Result Files** named `result_<invocation_instance>*`.
 - "bundle id" could mean a filename, URL, storage path, or unnecessary v1 concept; resolved: **Bundle ID** is required, identifies the expected update bundle independently of where it is served, and defaults to `baseline` in v1.
-- "scenario file" could include artifact verification metadata; resolved: the v1 **Scenario File** declares client count only, while bundle size and checksum come from the Update Server manifest.
+- "scenario file" could include artifact verification metadata or require impairment settings; resolved: the **Scenario File** expresses invocation intent, may include an optional `network_impairment` mapping for static fleet-wide router impairment, and leaves bundle size and checksum to the Update Server manifest.
 - "client id" could mean Docker's generated container ID or hostname; resolved: **Client ID** is a test-farm-assigned stable client name within an **invocation**.
 - "successful update" could mean server-side response or client-side receipt; resolved: success requires a Controller-validated successful **Receipt**.
 - "results" could mean source-server state, Hawkbit state, logs, or client callback; resolved: test-farm client outcomes flow through the **Receipt Channel**.

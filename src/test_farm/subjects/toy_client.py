@@ -94,7 +94,6 @@ async def _post_receipt(
 ) -> None:
     body = json.dumps(receipt.to_payload()).encode("utf-8")
     try:
-        print("try post")
         response = await client.post(
             (
                 f"{controller_reportback_url}/invocations/"
