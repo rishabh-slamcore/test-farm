@@ -11,6 +11,11 @@ from test_farm.runtime.preparation import RuntimePreparationError, RuntimePrepar
 from test_farm.scenario import Scenario, load_scenario_file
 
 
+def _assert_logged_messages(stderr: str, expected_messages: list[str]) -> None:
+    for message in expected_messages:
+        assert message in stderr
+
+
 @pytest.mark.parametrize(
     ("scenario_contents", "expected_error"),
     [
@@ -168,14 +173,17 @@ def test_prepare_runtime_reports_when_image_is_already_prepared(
 
     assert result.exit_code == 0
     assert observed_force_values == [False]
-    assert (
-        result.output
-        == "Baseline toy-client runtime image test-farm/toy-client-runtime:latest already exists. "
-        "Freshness is not checked; rerun with --force to rebuild it.\n"
-        "Baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest already exists. "
-        "Freshness is not checked; rerun with --force to rebuild it.\n"
-        "Baseline router runtime image test-farm/router-runtime:latest already exists. "
-        "Freshness is not checked; rerun with --force to rebuild it.\n"
+    assert result.stdout == ""
+    _assert_logged_messages(
+        result.stderr,
+        [
+            "Baseline toy-client runtime image test-farm/toy-client-runtime:latest already exists. "
+            "Freshness is not checked; rerun with --force to rebuild it.",
+            "Baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest already exists. "
+            "Freshness is not checked; rerun with --force to rebuild it.",
+            "Baseline router runtime image test-farm/router-runtime:latest already exists. "
+            "Freshness is not checked; rerun with --force to rebuild it.",
+        ],
     )
 
 
@@ -195,7 +203,7 @@ def test_prepare_runtime_exits_with_code_1_when_runtime_preparation_fails(
 
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert result.stderr == "Docker CLI is required to prepare the toy-client runtime.\n"
+    assert "Docker CLI is required to prepare the toy-client runtime." in result.stderr
 
 
 def test_prepare_runtime_rebuilds_when_forced(
@@ -229,11 +237,14 @@ def test_prepare_runtime_rebuilds_when_forced(
     result = runner.invoke(app, ["prepare-runtime", "--force"])
 
     assert result.exit_code == 0
-    assert (
-        result.output
-        == "Rebuilt baseline toy-client runtime image test-farm/toy-client-runtime:latest.\n"
-        "Rebuilt baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest.\n"
-        "Rebuilt baseline router runtime image test-farm/router-runtime:latest.\n"
+    assert result.stdout == ""
+    _assert_logged_messages(
+        result.stderr,
+        [
+            "Rebuilt baseline toy-client runtime image test-farm/toy-client-runtime:latest.",
+            "Rebuilt baseline toy-update server runtime image test-farm/toy-update-server-runtime:latest.",
+            "Rebuilt baseline router runtime image test-farm/router-runtime:latest.",
+        ],
     )
 
 
@@ -267,9 +278,8 @@ def test_run_exits_with_code_2_for_loopback_controller_bind_address(
 
     assert result.exit_code == 2
     assert (
-        result.stderr
-        == "Controller bind address must use a concrete non-loopback IPv4 address so "
-        "runtime-isolated clients can reach the host-side services.\n"
+        "Controller bind address must use a concrete non-loopback IPv4 address so "
+        "runtime-isolated clients can reach the host-side services." in result.stderr
     )
 
 
@@ -305,12 +315,9 @@ def test_run_exits_with_code_2_for_unreachable_controller_bind_address(
     assert result.exit_code == 2
     if bind_address == "0.0.0.0:8080":
         assert (
-            result.stderr
-            == "Controller bind address must use a concrete non-loopback IPv4 address so "
-            "runtime-isolated clients can reach the host-side services.\n"
+            "Controller bind address must use a concrete non-loopback IPv4 address so "
+            "runtime-isolated clients can reach the host-side services." in result.stderr
         )
         return
 
-    assert (
-        result.stderr == "Controller bind address must use an IPv4 address, got localhost.\n"
-    )
+    assert "Controller bind address must use an IPv4 address, got localhost." in result.stderr

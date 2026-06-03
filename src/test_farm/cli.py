@@ -1,6 +1,8 @@
 """CLI entry points for test-farm."""
 
 import asyncio
+import logging
+import sys
 from pathlib import Path
 
 import typer
@@ -14,8 +16,9 @@ from test_farm.runtime.preparation import (
     prepare_toy_update_server_runtime,
 )
 from test_farm.scenario import ScenarioFileError, load_scenario_file
-import logging
-import sys
+
+logger = logging.getLogger(__name__)
+
 
 def configure_logging(verbose: bool = False) -> None:
     level = logging.INFO if verbose else logging.WARNING
@@ -49,20 +52,20 @@ def run(
     ),
     results_dir: Path = typer.Option(
         Path("results"), "--results-dir", file_okay=False, resolve_path=True
-    )
+    ),
 ) -> None:
     """Run the current baseline invocation slice."""
     configure_logging(verbose=True)
     try:
         parse_reachable_service_endpoint(controller_bind_address)
     except ValueError as error:
-        typer.echo(str(error), err=True)
+        logger.error(str(error))
         raise typer.Exit(code=2) from error
 
     try:
         scenario = load_scenario_file(scenario_file)
     except ScenarioFileError as error:
-        typer.echo(str(error), err=True)
+        logger.error(str(error))
         raise typer.Exit(code=2) from error
 
     result_file, invocation_status = asyncio.run(
@@ -74,10 +77,10 @@ def run(
         )
     )
     if invocation_status == "success":
-        typer.echo(f"Invocation succeeded. Result written to {result_file}.")
+        logger.info(f"Invocation succeeded. Result written to {result_file}.")
         return
 
-    typer.echo(f"Invocation failed. Result written to {result_file}.")
+    logger.info(f"Invocation failed. Result written to {result_file}.")
     raise typer.Exit(code=1)
 
 
@@ -94,50 +97,53 @@ def prepare_runtime(
     By default this command only checks whether the prepared tag exists. It does not
     verify freshness against the current source tree. Use --force to rebuild.
     """
+    configure_logging(verbose=True)
 
     try:
         result_client = prepare_toy_client_runtime(force_rebuild=force)
         result_server = prepare_toy_update_server_runtime(force_rebuild=force)
         result_router = prepare_router_runtime(force_rebuild=force)
     except RuntimePreparationError as error:
-        typer.echo(str(error), err=True)
+        logger.error(str(error))
         raise typer.Exit(code=1) from error
 
     if result_client.created:
         if force:
-            typer.echo(f"Rebuilt baseline toy-client runtime image {result_client.image_tag}.")
+            logger.info(
+                f"Rebuilt baseline toy-client runtime image {result_client.image_tag}."
+            )
         else:
-            typer.echo(
+            logger.info(
                 f"Prepared baseline toy-client runtime image {result_client.image_tag}."
             )
     else:
-        typer.echo(
+        logger.info(
             f"Baseline toy-client runtime image {result_client.image_tag} already exists. "
             "Freshness is not checked; rerun with --force to rebuild it."
         )
 
     if result_server.created:
         if force:
-            typer.echo(
+            logger.info(
                 f"Rebuilt baseline toy-update server runtime image {result_server.image_tag}."
             )
         else:
-            typer.echo(
+            logger.info(
                 f"Prepared baseline toy-update server runtime image {result_server.image_tag}."
             )
     else:
-        typer.echo(
+        logger.info(
             f"Baseline toy-update server runtime image {result_server.image_tag} already exists. "
             "Freshness is not checked; rerun with --force to rebuild it."
         )
 
     if result_router.created:
         if force:
-            typer.echo(f"Rebuilt baseline router runtime image {result_router.image_tag}.")
+            logger.info(f"Rebuilt baseline router runtime image {result_router.image_tag}.")
         else:
-            typer.echo(f"Prepared baseline router runtime image {result_router.image_tag}.")
+            logger.info(f"Prepared baseline router runtime image {result_router.image_tag}.")
     else:
-        typer.echo(
+        logger.info(
             f"Baseline router runtime image {result_router.image_tag} already exists. "
             "Freshness is not checked; rerun with --force to rebuild it."
         )

@@ -10,6 +10,7 @@ from subprocess import run
 
 import pytest
 
+from test_farm.bundles import load_default_bundle
 from test_farm.controller import start_controller_server
 from test_farm.identifiers import expected_client_ids, runtime_container_name
 from test_farm.models import DEFAULT_BUNDLE, ClientOutcome, ClientStatus
@@ -179,7 +180,7 @@ async def _run_invocation(
         bind_address=controller_bind_address,
         invocation_instance=invocation_instance,
         expected_client_ids=expected_client_ids(1),
-        expected_bundle=DEFAULT_BUNDLE,
+        expected_bundle=load_default_bundle(),
     ) as controller_server:
         session = runner.start_session(
             client_ids=expected_client_ids(1),
@@ -265,7 +266,7 @@ async def _run_routed_client_isolation_probe(
             bind_address=controller_bind_address,
             invocation_instance=invocation_instance,
             expected_client_ids=expected_client_ids(1),
-            expected_bundle=DEFAULT_BUNDLE,
+            expected_bundle=load_default_bundle(),
         ) as controller_server:
             session = runner.start_session(
                 client_ids=expected_client_ids(1),

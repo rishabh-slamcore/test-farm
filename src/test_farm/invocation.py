@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Mapping, TypedDict, cast
+
+logger = logging.getLogger(__name__)
 
 import httpx
 
@@ -153,6 +156,7 @@ async def execute_invocation(
             all_client_outcomes_recorded_task = asyncio.create_task(
                 controller_server.wait_for_client_outcomes(scenario.receipt_timeout_seconds)
             )
+            logger.info("Wait for clients")
             await _wait_for_invocation_completion(
                 invocation_session=invocation_session,
                 all_subjects_done_task=all_subjects_done_task,
@@ -160,6 +164,7 @@ async def execute_invocation(
                 expected_client_ids=expected_client_ids,
                 controller_server=controller_server,
             )
+            logger.info("Result file generation begins")
     finished_at = _utc_now()
     invocation_dir = _ensure_invocation_dir(results_dir, invocation_instance)
     client_outcomes = [
@@ -220,7 +225,6 @@ async def _wait_for_invocation_completion(
         waitables,
         return_when=asyncio.FIRST_COMPLETED,
     )
-
     if all_client_outcomes_recorded_task in done:
         all_client_outcomes_recorded = all_client_outcomes_recorded_task.result()
         if not all_client_outcomes_recorded:

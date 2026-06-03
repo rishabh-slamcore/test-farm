@@ -13,13 +13,14 @@ from test_farm.bundles import FileBackedBundleSource
 from test_farm.identifiers import expected_client_ids
 from test_farm.invocation import execute_invocation
 from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientOutcome, ClientStatus
+from test_farm.network_impairment import NetworkImpairment
 from test_farm.runtime.invocation.in_process import InProcessInvocationRunner
 from test_farm.runtime.invocation_protocol import (
     InvocationRunner,
     InvocationSession,
     RuntimeSetupError,
 )
-from test_farm.scenario import NetworkImpairment, Scenario
+from test_farm.scenario import Scenario
 from test_farm.subjects.toy_client import CLIENT_ID_ENV
 from test_farm.subjects.update_server import UpdateServer
 
@@ -267,7 +268,7 @@ def test_execute_invocation_passes_network_impairment_to_invocation_runner(
             controller_reportback_url: str,
             update_server_url: str,
             bundle_id: str,
-            network_impairment: NetworkImpairment | None,
+            network_impairment: NetworkImpairment | None = None,
         ) -> _ObservingSession:
             del client_ids
             del controller_reportback_url

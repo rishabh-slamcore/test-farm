@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from ipaddress import IPv4Network
 from pathlib import Path
@@ -8,7 +9,6 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 import httpx
-import logging
 
 from test_farm.bundles import DEFAULT_BUNDLE_FILE
 from test_farm.identifiers import (
@@ -46,6 +46,7 @@ CLIENT_START_GATE_FILE = "/tmp/test-farm-start"
 SERVER_HEALTH_TIMEOUT_SECONDS = 5.0
 ROUTER_CLIENT_INTERFACE_NAME = "eth1"
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class _RoutedInvocationTopology:
@@ -185,7 +186,7 @@ class DockerInvocationRunner:
         self._server_container_name = server_container_name(self._invocation_instance)
         self._server_network_name = server_runtime_network_name(self._invocation_instance)
         self._router_container_name = router_container_name(self._invocation_instance)
-        
+
         self._create_network(
             network_name=self._server_network_name,
             subnet=self._topology.server_subnet,
@@ -196,7 +197,7 @@ class DockerInvocationRunner:
             internal=True,
         )
         self._start_router_container()
-        #logger.info(f"Started router container: {self._router_container_name}")
+        logger.info(f"Started router container: {self._router_container_name}")
 
         update_server_port = controller_endpoint.port
         update_server_bind_address = f"0.0.0.0:{update_server_port}"
@@ -239,7 +240,7 @@ class DockerInvocationRunner:
                     ),
                 )
             )
-        #logger.info(f"Started update server: {self._server_container_name}")
+        logger.info(f"Started update server: {self._server_container_name}")
         update_server_url = f"http://{self._topology.update_server_ip}:{update_server_port}"
         # await _wait_for_http_health(f"{update_server_url}/health")
         return update_server_url
@@ -386,8 +387,7 @@ class DockerInvocationRunner:
                         container_name=container_name,
                         controller_reportback_url=controller_reportback_url,
                     )
-                    self._release_client_start_gate(container_name=container_name)
-                    #logger.info(f"Started client: {container_name}")
+                    # logger.info(f"Started client: {container_name}")
             except RuntimeSetupError as error:
                 startup_failures[client_id] = str(error)
                 continue
@@ -395,7 +395,20 @@ class DockerInvocationRunner:
             started_client_ids.append(client_id)
             container_names_by_client_id[client_id] = container_name
 
-    
+        for client_index, client_id in enumerate(client_ids, start=1):
+            container_name = runtime_container_name(
+                invocation_instance=self._invocation_instance,
+                client_id=client_id,
+            )
+            try:
+                if self._topology is not None:
+                    self._release_client_start_gate(container_name=container_name)
+                    logger.info(f"Started client: {container_name}")
+            except RuntimeSetupError as error:
+                startup_failures[client_id] = str(error)
+                started_client_ids.remove(client_id)
+                container_names_by_client_id.pop(client_id)
+                continue
 
         return DockerInvocationSession(
             command_runner=self._command_runner,

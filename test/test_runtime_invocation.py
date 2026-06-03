@@ -7,10 +7,9 @@ from subprocess import CompletedProcess
 import pytest
 from pytest import MonkeyPatch
 
-from test_farm.network_impairment import router_tc_commands
+from test_farm.network_impairment import NetworkImpairment, router_tc_commands
 from test_farm.runtime.invocation.docker import DockerInvocationRunner
 from test_farm.runtime.invocation_protocol import RuntimeSetupError
-from test_farm.scenario import NetworkImpairment
 
 
 @pytest.mark.usefixtures("docker_available_for_runtime_invocation")
