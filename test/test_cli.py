@@ -73,6 +73,15 @@ def _assert_logged_messages(stderr: str, expected_messages: list[str]) -> None:
             ),
             "must set network_impairment.loss to a percentage between 0 and 100",
         ),
+        (
+            (
+                "client_count: 1\n"
+                "receipt_timeout_seconds: 0\n"
+                "network_impairment:\n"
+                "  bandwidth_limit: 1.1bit\n"
+            ),
+            "must set network_impairment.bandwidth_limit to a rate like 1mbit",
+        ),
     ],
 )
 def test_run_exits_with_code_2_for_invalid_scenario_files(
@@ -132,9 +141,9 @@ def test_load_scenario_file_parses_supported_router_network_impairment(
     scenario = load_scenario_file(scenario_file)
 
     assert scenario.network_impairment is not None
-    assert scenario.network_impairment.delay == "100ms"
+    assert scenario.network_impairment.delay == 0.1
     assert scenario.network_impairment.loss == 5.0
-    assert scenario.network_impairment.bandwidth_limit == "1mbit"
+    assert scenario.network_impairment.bandwidth_limit == 1_000_000
 
 
 def test_prepare_runtime_reports_when_image_is_already_prepared(

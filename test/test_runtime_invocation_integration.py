@@ -13,7 +13,7 @@ import pytest
 from test_farm.bundles import load_default_bundle
 from test_farm.controller import start_controller_server
 from test_farm.identifiers import expected_client_ids, runtime_container_name
-from test_farm.models import DEFAULT_BUNDLE, ClientOutcome, ClientStatus
+from test_farm.models import DEFAULT_BUNDLE, Bundle, ClientOutcome, ClientStatus
 from test_farm.runtime.invocation.docker import DockerInvocationRunner
 from test_farm.runtime.invocation.in_process import InProcessInvocationRunner
 from test_farm.runtime.invocation_protocol import InvocationRunner
@@ -41,6 +41,7 @@ def test_in_process_invocation_runner_records_success_client_outcome(
             controller_bind_address=reachable_bind_address,
             update_server_bind_address=reachable_update_server_bind_address,
             invocation_dir=tmp_path,
+            bundle=DEFAULT_BUNDLE,
         ),
     )
 
@@ -169,6 +170,7 @@ async def _run_invocation(
     invocation_dir: Path,
     invocation_instance: int,
     run_update_server: bool = True,
+    bundle: Bundle | None = None,
 ) -> dict[str, ClientOutcome]:
 
     update_server_url = f"http://{update_server_bind_address}"
@@ -180,7 +182,7 @@ async def _run_invocation(
         bind_address=controller_bind_address,
         invocation_instance=invocation_instance,
         expected_client_ids=expected_client_ids(1),
-        expected_bundle=load_default_bundle(),
+        expected_bundle=bundle if bundle else load_default_bundle(),
     ) as controller_server:
         session = runner.start_session(
             client_ids=expected_client_ids(1),
@@ -210,6 +212,7 @@ async def _run_successful_runner_session(
     controller_bind_address: str,
     update_server_bind_address: str,
     invocation_dir: Path,
+    bundle: Bundle | None = None,
 ) -> dict[str, ClientOutcome]:
     return await _run_invocation(
         runner=runner,
@@ -217,6 +220,7 @@ async def _run_successful_runner_session(
         update_server_bind_address=update_server_bind_address,
         invocation_dir=invocation_dir / "success",
         invocation_instance=_invocation_instance_from_bind_address(controller_bind_address),
+        bundle=bundle,
     )
 
 

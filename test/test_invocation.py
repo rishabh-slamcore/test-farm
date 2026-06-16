@@ -210,9 +210,9 @@ def test_execute_invocation_passes_network_impairment_to_invocation_runner(
         client_count=1,
         receipt_timeout_seconds=2.0,
         network_impairment=NetworkImpairment(
-            delay="100ms",
+            delay=0.1,
             loss=5.0,
-            bandwidth_limit="1mbit",
+            bandwidth_limit=1_000_000,
         ),
     )
 

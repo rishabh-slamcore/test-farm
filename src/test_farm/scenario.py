@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +18,19 @@ class ScenarioFileError(ValueError):
 _DELAY_PATTERN = re.compile(r"^\d+(?:\.\d+)?(?:us|ms|s)$")
 _BANDWIDTH_LIMIT_PATTERN = re.compile(r"^\d+(?:\.\d+)?(?:bit|kbit|mbit|gbit|tbit)$")
 _LOSS_PERCENT_PATTERN = re.compile(r"^\d+(?:\.\d+)?%$")
+_DELAY_FACTORS_BY_UNIT = {
+    "us": Decimal("0.000001"),
+    "ms": Decimal("0.001"),
+    "s": Decimal("1"),
+}
+_BANDWIDTH_FACTORS_BY_UNIT = {
+    "bit": Decimal("1"),
+    "kbit": Decimal("1000"),
+    "mbit": Decimal("1000000"),
+    "gbit": Decimal("1000000000"),
+    "tbit": Decimal("1000000000000"),
+}
+_BANDWIDTH_UNITS_BY_LENGTH = tuple(sorted(_BANDWIDTH_FACTORS_BY_UNIT, key=len, reverse=True))
 
 
 @dataclass(frozen=True)
@@ -161,7 +175,7 @@ def _parse_network_impairment(
 def _parse_network_impairment_delay(
     path: Path,
     raw_network_impairment: dict[str, Any],
-) -> str | None:
+) -> float | None:
     raw_delay = raw_network_impairment.get("delay")
     if raw_delay is None:
         return None
@@ -171,7 +185,7 @@ def _parse_network_impairment_delay(
             f"Scenario file {path} must set network_impairment.delay to a duration like 100ms."
         )
 
-    return raw_delay
+    return _parse_delay_seconds(raw_delay)
 
 
 def _parse_network_impairment_loss(
@@ -208,7 +222,7 @@ def _parse_network_impairment_loss(
 def _parse_network_impairment_bandwidth_limit(
     path: Path,
     raw_network_impairment: dict[str, Any],
-) -> str | None:
+) -> int | None:
     raw_bandwidth_limit = raw_network_impairment.get("bandwidth_limit")
     if raw_bandwidth_limit is None:
         return None
@@ -221,4 +235,38 @@ def _parse_network_impairment_bandwidth_limit(
             f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
         )
 
-    return raw_bandwidth_limit
+    parsed_bandwidth_limit = _parse_bandwidth_limit_bps(path, raw_bandwidth_limit)
+    if parsed_bandwidth_limit <= 0:
+        raise ScenarioFileError(
+            "Scenario file "
+            f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
+        )
+
+    return parsed_bandwidth_limit
+
+
+def _parse_delay_seconds(raw_delay: str) -> float:
+    if raw_delay.endswith("us"):
+        delay_unit = "us"
+    elif raw_delay.endswith("ms"):
+        delay_unit = "ms"
+    else:
+        delay_unit = "s"
+
+    delay_value = Decimal(raw_delay[: -len(delay_unit)])
+    return float(delay_value * _DELAY_FACTORS_BY_UNIT[delay_unit])
+
+
+def _parse_bandwidth_limit_bps(path: Path, raw_bandwidth_limit: str) -> int:
+    matched_unit = next(
+        unit for unit in _BANDWIDTH_UNITS_BY_LENGTH if raw_bandwidth_limit.endswith(unit)
+    )
+    parsed_value = Decimal(raw_bandwidth_limit[: -len(matched_unit)])
+    parsed_bandwidth_limit = parsed_value * _BANDWIDTH_FACTORS_BY_UNIT[matched_unit]
+    if parsed_bandwidth_limit != parsed_bandwidth_limit.to_integral_value():
+        raise ScenarioFileError(
+            "Scenario file "
+            f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
+        )
+
+    return int(parsed_bandwidth_limit)

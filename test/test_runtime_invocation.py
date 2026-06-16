@@ -481,7 +481,7 @@ def test_docker_invocation_runner_applies_router_network_impairment_before_start
         controller_reportback_url="http://192.168.1.10:8080",
         update_server_url="http://10.0.7.2:8081",
         bundle_id="baseline",
-        network_impairment=NetworkImpairment(delay="100ms", loss=5.0),
+        network_impairment=NetworkImpairment(delay=0.1, loss=5.0),
     )
 
     router_impairment_call = [
@@ -582,9 +582,9 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
         update_server_url="http://10.0.7.2:8081",
         bundle_id="baseline",
         network_impairment=NetworkImpairment(
-            delay="100ms",
+            delay=0.1,
             loss=5.0,
-            bandwidth_limit="1mbit",
+            bandwidth_limit=1_000_000,
         ),
     )
 
@@ -594,7 +594,7 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
         if args[:4] == ["docker", "exec", "test-farm-007-router", "sh"]
         and args[-1]
         == (
-            "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit\n"
+            "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000\n"
             "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
         )
     ]
@@ -608,7 +608,7 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
             "sh",
             "-c",
             (
-                "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit\n"
+                "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000\n"
                 "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
             ),
         ]
@@ -618,16 +618,33 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
 def test_router_tc_commands_chain_tbf_before_netem_for_bandwidth_limited_impairment() -> None:
     commands = router_tc_commands(
         network_impairment=NetworkImpairment(
-            delay="100ms",
+            delay=0.1,
             loss=5.0,
-            bandwidth_limit="1mbit",
+            bandwidth_limit=1_000_000,
         ),
         interface_name="eth1",
     )
 
     assert commands == (
-        "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit",
+        "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000",
         "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%",
+    )
+
+
+def test_router_tc_commands_fall_back_to_seconds_and_raw_bits_for_non_exact_readable_units() -> (
+    None
+):
+    commands = router_tc_commands(
+        network_impairment=NetworkImpairment(
+            delay=0.0000015,
+            bandwidth_limit=48_001,
+        ),
+        interface_name="eth1",
+    )
+
+    assert commands == (
+        "tc qdisc add dev eth1 root handle 1: tbf rate 48001bit burst 6000",
+        "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 0.0000015s",
     )
 
 
