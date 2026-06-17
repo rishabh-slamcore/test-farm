@@ -594,7 +594,7 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
         if args[:4] == ["docker", "exec", "test-farm-007-router", "sh"]
         and args[-1]
         == (
-            "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000\n"
+            "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000 latency 50ms\n"
             "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
         )
     ]
@@ -608,7 +608,7 @@ def test_docker_invocation_runner_executes_tbf_then_netem_for_bandwidth_limited_
             "sh",
             "-c",
             (
-                "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000\n"
+                "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000 latency 50ms\n"
                 "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%"
             ),
         ]
@@ -626,7 +626,7 @@ def test_router_tc_commands_chain_tbf_before_netem_for_bandwidth_limited_impairm
     )
 
     assert commands == (
-        "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000",
+        "tc qdisc add dev eth1 root handle 1: tbf rate 1mbit burst 6000 latency 50ms",
         "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 100ms loss 5%",
     )
 
@@ -643,7 +643,7 @@ def test_router_tc_commands_fall_back_to_seconds_and_raw_bits_for_non_exact_read
     )
 
     assert commands == (
-        "tc qdisc add dev eth1 root handle 1: tbf rate 48001bit burst 6000",
+        "tc qdisc add dev eth1 root handle 1: tbf rate 48001bit burst 6000 latency 50ms",
         "tc qdisc add dev eth1 parent 1:1 handle 10: netem delay 0.0000015s",
     )
 
