@@ -312,17 +312,6 @@ Worth restating because it's the most common conceptual mistake: `tc qdisc add d
 
 If the test scenarios need to simulate degraded client uploads, you need IFB (see next).
 
-### IFB (Intermediate Functional Block)
-
-IFB is a virtual interface you create and route ingress traffic into. The flow:
-
-1. Create an IFB device: `ip link add ifb0 type ifb && ip link set ifb0 up`.
-2. Attach an ingress qdisc to your real interface: `tc qdisc add dev eth0 handle ffff: ingress`.
-3. Add a filter on the ingress qdisc that redirects all matched packets to the IFB device: `tc filter add dev eth0 parent ffff: protocol ip u32 match u32 0 0 action mirred egress redirect dev ifb0`.
-4. Now build your normal egress qdisc tree on `ifb0` instead of `eth0`. Packets arriving on eth0 get redirected to ifb0's egress, where your HTB/netem/TBF tree shapes them.
-
-You've correctly scoped this out of v1. When you do add it, the conceptual model is straightforward — it's the same tree, just attached to a virtual interface that intercepts ingress.
-
 ---
 
 ## A few things worth knowing that aren't on your list

@@ -32,6 +32,14 @@ _Avoid_: Filename, URL, artifact path
 A developer-authored YAML file describing the intended invocation shape.
 _Avoid_: Bundle manifest, result file
 
+**Disruptor**:
+A utility that applies network impairment to real Slamcore Aware devices while an external updater drives and validates update delivery.
+_Avoid_: Controller, Update Server, test-farm run
+
+**Disruptor Scenario File**:
+A developer-authored YAML file describing the network impairment policy the Disruptor applies to discovered or selected real devices.
+_Avoid_: Scenario File, invocation file, bundle manifest
+
 **Receipt**:
 A client-posted outcome observation delivered to the Controller over the Receipt Channel.
 For a successful download it includes a reported bundle; the Controller then derives the final client outcome.
@@ -106,6 +114,21 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - Static network impairment is applied at the **Router Container**, not independently per client.
 - Milestone 1 uses separate runtime images/containers for the Router Container, Update Server, and client.
 - The Controller remains a host-side process in Milestone 1.
+- A **Disruptor** is started with one **Disruptor Scenario File**.
+- A **Disruptor Scenario File** defines a default impairment policy plus optional device-specific overrides.
+- A **Disruptor Scenario File** applies its default impairment policy to every discovered Slamcore Aware device.
+- A **Disruptor Scenario File** evaluates device-specific overrides in order, and the first matching override determines that device's impairment policy.
+- A device-specific override in a **Disruptor Scenario File** replaces the default impairment policy rather than merging with it.
+- A **Disruptor Scenario File** can set an impairment policy to `none` to intentionally leave matched devices unimpaired.
+- A device-specific override in a **Disruptor Scenario File** can be active only during scheduled time windows.
+- A scheduled override in a **Disruptor Scenario File** falls back to `none` outside its active window unless the file explicitly says otherwise.
+- A scheduled override in a **Disruptor Scenario File** can repeat as an active/inactive cycle until the **Disruptor** stops.
+- A **Disruptor Scenario File** selects devices through mDNS-resolved identities, not explicit IP literals.
+- A **Disruptor Scenario File** is applied best effort: unmatched device selectors are logged while matching discovered devices are still impaired.
+- A **Disruptor** impairs traffic leaving the disruptor toward discovered device IPs; unrelated traffic to those devices is outside its control.
+- A **Disruptor** does not intentionally impair traffic from devices back toward the updater in v1.
+- A **Disruptor** impairs traffic while it is running; the external updater remains responsible for starting downloads and validating delivery success.
+- A **Disruptor** command blocks while impairment is active and tears down its impairment policy when stopped.
 
 ## Example Dialogue
 
@@ -172,6 +195,9 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 > **Dev:** "Can the toy Update Server and client share one image?"
 > **Domain expert:** "No — keep router, Update Server, and client as separate runtime images so later replacements stay clean."
 
+> **Dev:** "Can we use the existing Scenario File shape for real-device disruption?"
+> **Domain expert:** "No — use a **Disruptor Scenario File** because the **Disruptor** controls network impairment only, while the updater owns download triggering and validation."
+
 ## Flagged Ambiguities
 
 - "first milestone" initially included a simple impairment; resolved: the first milestone produces a **baseline result** with no intentional impairment.
@@ -186,3 +212,4 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - "controller port" could be implicit or auto-selected; resolved: use an explicit **Controller Bind Address** in Milestone 1.
 - "update source" and "toy server" referred to the server role that provides bundles; resolved: use **Update Server**.
 - "router" could mean a NAT gateway or a routed impairment node; resolved: the **Router Container** uses **Explicit Routing**, not NAT.
+- "scenario file" can refer to either invocation shape or real-device disruption policy; resolved: use **Scenario File** for `test-farm run` invocations and **Disruptor Scenario File** for Disruptor impairment policy.
