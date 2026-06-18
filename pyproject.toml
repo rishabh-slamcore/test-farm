@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 test-farm = "test_farm.cli:main"
+disruptor = "test_farm.disruptor_cli:main"
 
 [dependency-groups]
 dev = [

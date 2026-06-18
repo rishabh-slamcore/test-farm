@@ -6,6 +6,10 @@ from collections.abc import Callable
 import pytest
 from pytest import Config, Item, MonkeyPatch, fixture
 
+from test_farm.disruptor import DiscoveredDevice
+
+DiscoveredDevicesFactory = Callable[[int], list[DiscoveredDevice]]
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register suite options used by local and host-side tests."""
@@ -71,3 +75,17 @@ def reachable_bind_address(bind_address_factory: Callable[[], str]) -> str:
 def reachable_update_server_bind_address(bind_address_factory: Callable[[], str]) -> str:
     """Return a deterministic update-server address for tests that do not bind."""
     return bind_address_factory()
+
+
+@pytest.fixture
+def discovered_devices() -> DiscoveredDevicesFactory:
+    def build_discovered_devices(device_count: int) -> list[DiscoveredDevice]:
+        return [
+            DiscoveredDevice(
+                device_id=f"sc-aware-{index+10}",
+                ip_address=f"192.0.2.{index + 10}",
+            )
+            for index in range(device_count)
+        ]
+
+    return build_discovered_devices

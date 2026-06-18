@@ -43,6 +43,18 @@ class Scenario:
     network_impairment: NetworkImpairment | None = None
 
 
+class DisruptorScenarioFileError(ValueError):
+    """Raised when a Disruptor Scenario File is malformed."""
+
+
+@dataclass(frozen=True)
+class DisruptorScenario:
+    """The default-only Disruptor Scenario File contract."""
+
+    scenario_file: Path
+    default_impairment: NetworkImpairment
+
+
 def load_scenario_file(path: Path) -> Scenario:
     """Load and validate a scenario file.
 
@@ -70,6 +82,90 @@ def load_scenario_file(path: Path) -> Scenario:
         client_count=_parse_client_count(path, raw_data),
         receipt_timeout_seconds=_parse_receipt_timeout_seconds(path, raw_data),
         network_impairment=_parse_network_impairment(path, raw_data),
+    )
+
+
+def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
+    """Load and validate a default-only Disruptor Scenario File.
+
+    :param path: Path to the scenario YAML file.
+    :returns: Parsed Disruptor scenario model.
+    :raises DisruptorScenarioFileError: If the YAML or scenario shape is invalid.
+    """
+
+    try:
+        raw_data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise DisruptorScenarioFileError(
+            f"Could not read Disruptor Scenario File {path}: {error}"
+        ) from error
+    except yaml.YAMLError as error:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario File {path} is not valid YAML: {error}"
+        ) from error
+
+    if not isinstance(raw_data, dict):
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario File {path} must contain a network_impairment mapping."
+        )
+
+    _validate_scenario_fields(
+        actual_fields=set(raw_data),
+        expected_fields={"network_impairment"},
+    )
+
+    raw_network_impairment = raw_data["network_impairment"]
+    if not isinstance(raw_network_impairment, dict):
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario File {path} must set network_impairment to a mapping."
+        )
+
+    _validate_scenario_fields(
+        actual_fields={f"network_impairment.{field}" for field in raw_network_impairment},
+        expected_fields={"network_impairment.default"},
+    )
+
+    try:
+        default_impairment = _parse_network_impairment(
+            path,
+            {"network_impairment": raw_network_impairment["default"]},
+        )
+    except ScenarioFileError as error:
+        message = str(error)
+        message = message.replace("Scenario file", "Disruptor Scenario File")
+        message = message.replace("network_impairment", "network_impairment.default")
+        raise DisruptorScenarioFileError(message) from error
+
+    if default_impairment is None:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario File {path} must set network_impairment.default to a mapping."
+        )
+
+    return DisruptorScenario(
+        scenario_file=path,
+        default_impairment=default_impairment,
+    )
+
+
+def _validate_scenario_fields(
+    *,
+    actual_fields: set[str],
+    expected_fields: set[str],
+) -> None:
+    if actual_fields == expected_fields:
+        return
+
+    unknown_fields = actual_fields - expected_fields
+    if unknown_fields:
+        unknown_field_list = ", ".join(sorted(unknown_fields))
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario File contains unknown fields: {unknown_field_list}."
+        )
+
+    missing_fields = expected_fields - actual_fields
+    missing_field_list = ", ".join(sorted(missing_fields))
+    raise DisruptorScenarioFileError(
+        f"Disruptor Scenario File is missing required field {missing_field_list}."
     )
 
 
