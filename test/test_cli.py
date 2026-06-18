@@ -106,7 +106,6 @@ def test_run_exits_with_code_2_for_invalid_scenario_files(
 
     assert result.exit_code == 2
     assert expected_error in result.stderr
-    assert str(scenario_file) in result.stderr
     assert not (tmp_path / "results").exists()
 
 

@@ -6,7 +6,15 @@ from pathlib import Path
 import pytest
 
 from test_farm.disruptor import DiscoveredDevice, build_default_disruptor_tc_plan
-from test_farm.scenario import DisruptorScenarioFileError, load_disruptor_scenario_file
+from test_farm.scenario import (
+    DisruptorScenarioFileError,
+    ScenarioFileError,
+    load_disruptor_scenario_file,
+)
+
+
+def test_disruptor_scenario_file_error_is_a_scenario_file_error() -> None:
+    assert issubclass(DisruptorScenarioFileError, ScenarioFileError)
 
 
 def test_load_disruptor_scenario_file_parses_default_impairment(tmp_path: Path) -> None:

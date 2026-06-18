@@ -43,7 +43,7 @@ class Scenario:
     network_impairment: NetworkImpairment | None = None
 
 
-class DisruptorScenarioFileError(ValueError):
+class DisruptorScenarioFileError(ScenarioFileError):
     """Raised when a Disruptor Scenario File is malformed."""
 
 
@@ -79,9 +79,9 @@ def load_scenario_file(path: Path) -> Scenario:
 
     return Scenario(
         scenario_file=path,
-        client_count=_parse_client_count(path, raw_data),
-        receipt_timeout_seconds=_parse_receipt_timeout_seconds(path, raw_data),
-        network_impairment=_parse_network_impairment(path, raw_data),
+        client_count=_parse_client_count(raw_data),
+        receipt_timeout_seconds=_parse_receipt_timeout_seconds(raw_data),
+        network_impairment=_parse_network_impairment(raw_data),
     )
 
 
@@ -106,7 +106,7 @@ def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
 
     if not isinstance(raw_data, dict):
         raise DisruptorScenarioFileError(
-            f"Disruptor Scenario File {path} must contain a network_impairment mapping."
+            f"Disruptor Scenario must contain a network_impairment mapping."
         )
 
     _validate_scenario_fields(
@@ -117,7 +117,7 @@ def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
     raw_network_impairment = raw_data["network_impairment"]
     if not isinstance(raw_network_impairment, dict):
         raise DisruptorScenarioFileError(
-            f"Disruptor Scenario File {path} must set network_impairment to a mapping."
+            f"Disruptor Scenario must set network_impairment to a mapping."
         )
 
     _validate_scenario_fields(
@@ -127,7 +127,6 @@ def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
 
     try:
         default_impairment = _parse_network_impairment(
-            path,
             {"network_impairment": raw_network_impairment["default"]},
         )
     except ScenarioFileError as error:
@@ -138,7 +137,7 @@ def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
 
     if default_impairment is None:
         raise DisruptorScenarioFileError(
-            f"Disruptor Scenario File {path} must set network_impairment.default to a mapping."
+            f"Disruptor Scenario must set network_impairment.default to a mapping."
         )
 
     return DisruptorScenario(
@@ -169,10 +168,9 @@ def _validate_scenario_fields(
     )
 
 
-def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
+def _parse_client_count(raw_data: dict[str, Any]) -> int:
     """Validate the supported client-count field.
 
-    :param path: Path to the scenario YAML file.
     :param raw_data: Parsed raw YAML mapping.
     :returns: Validated client count.
     :raises ScenarioFileError: If the mapping shape is invalid.
@@ -186,15 +184,11 @@ def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
 
     if missing_fields:
         missing_field = sorted(missing_fields)[0]
-        raise ScenarioFileError(
-            f"Scenario file {path} is missing required field {missing_field}."
-        )
+        raise ScenarioFileError(f"Scenario is missing required field {missing_field}.")
 
     if unknown_fields:
         unknown_field_list = ", ".join(sorted(unknown_fields))
-        raise ScenarioFileError(
-            f"Scenario file {path} contains unknown fields: {unknown_field_list}."
-        )
+        raise ScenarioFileError(f"Scenario contains unknown fields: {unknown_field_list}.")
 
     raw_client_count = raw_data["client_count"]
     if (
@@ -202,17 +196,14 @@ def _parse_client_count(path: Path, raw_data: dict[str, Any]) -> int:
         or not isinstance(raw_client_count, int)
         or raw_client_count < 1
     ):
-        raise ScenarioFileError(
-            f"Scenario file {path} must set client_count to a positive integer."
-        )
+        raise ScenarioFileError(f"Scenario must set client_count to a positive integer.")
 
     return cast(int, raw_client_count)
 
 
-def _parse_receipt_timeout_seconds(path: Path, raw_data: dict[str, Any]) -> float:
+def _parse_receipt_timeout_seconds(raw_data: dict[str, Any]) -> float:
     """Validate the supported receipt-timeout field.
 
-    :param path: Path to the scenario YAML file.
     :param raw_data: Parsed raw YAML mapping.
     :returns: Validated receipt timeout in seconds.
     :raises ScenarioFileError: If the mapping shape is invalid.
@@ -225,14 +216,13 @@ def _parse_receipt_timeout_seconds(path: Path, raw_data: dict[str, Any]) -> floa
         or raw_receipt_timeout_seconds < 0
     ):
         raise ScenarioFileError(
-            f"Scenario file {path} must set receipt_timeout_seconds to a non-negative number."
+            f"Scenario must set receipt_timeout_seconds to a non-negative number."
         )
 
     return float(raw_receipt_timeout_seconds)
 
 
 def _parse_network_impairment(
-    path: Path,
     raw_data: dict[str, Any],
 ) -> NetworkImpairment | None:
     raw_network_impairment = raw_data.get("network_impairment")
@@ -240,9 +230,7 @@ def _parse_network_impairment(
         return None
 
     if not isinstance(raw_network_impairment, dict):
-        raise ScenarioFileError(
-            f"Scenario file {path} must set network_impairment to a mapping."
-        )
+        raise ScenarioFileError(f"Scenario must set network_impairment to a mapping.")
 
     actual_fields = set(raw_network_impairment)
     expected_fields = {"delay", "loss", "bandwidth_limit"}
@@ -250,26 +238,20 @@ def _parse_network_impairment(
     if unknown_fields:
         unknown_field_list = ", ".join(sorted(unknown_fields))
         raise ScenarioFileError(
-            "Scenario file "
-            f"{path} contains unknown network_impairment fields: {unknown_field_list}."
+            f"Scenario contains unknown network_impairment fields: {unknown_field_list}."
         )
 
     if actual_fields == set():
-        raise ScenarioFileError(
-            f"Scenario file {path} must set at least one network_impairment field."
-        )
+        raise ScenarioFileError(f"Scenario must set at least one network_impairment field.")
 
     return NetworkImpairment(
-        delay=_parse_network_impairment_delay(path, raw_network_impairment),
-        loss=_parse_network_impairment_loss(path, raw_network_impairment),
-        bandwidth_limit=_parse_network_impairment_bandwidth_limit(
-            path, raw_network_impairment
-        ),
+        delay=_parse_network_impairment_delay(raw_network_impairment),
+        loss=_parse_network_impairment_loss(raw_network_impairment),
+        bandwidth_limit=_parse_network_impairment_bandwidth_limit(raw_network_impairment),
     )
 
 
 def _parse_network_impairment_delay(
-    path: Path,
     raw_network_impairment: dict[str, Any],
 ) -> float | None:
     raw_delay = raw_network_impairment.get("delay")
@@ -278,14 +260,13 @@ def _parse_network_impairment_delay(
 
     if not isinstance(raw_delay, str) or not _DELAY_PATTERN.fullmatch(raw_delay):
         raise ScenarioFileError(
-            f"Scenario file {path} must set network_impairment.delay to a duration like 100ms."
+            f"Scenario must set network_impairment.delay to a duration like 100ms."
         )
 
     return _parse_delay_seconds(raw_delay)
 
 
 def _parse_network_impairment_loss(
-    path: Path,
     raw_network_impairment: dict[str, Any],
 ) -> float | None:
     raw_loss = raw_network_impairment.get("loss")
@@ -295,7 +276,7 @@ def _parse_network_impairment_loss(
     parsed_loss: float
     if isinstance(raw_loss, bool):
         raise ScenarioFileError(
-            f"Scenario file {path} must set network_impairment.loss to a percentage between 0 and 100."
+            f"Scenario must set network_impairment.loss to a percentage between 0 and 100."
         )
 
     if isinstance(raw_loss, int | float):
@@ -304,19 +285,18 @@ def _parse_network_impairment_loss(
         parsed_loss = float(raw_loss[:-1])
     else:
         raise ScenarioFileError(
-            f"Scenario file {path} must set network_impairment.loss to a percentage between 0 and 100."
+            f"Scenario must set network_impairment.loss to a percentage between 0 and 100."
         )
 
     if parsed_loss < 0 or parsed_loss > 100:
         raise ScenarioFileError(
-            f"Scenario file {path} must set network_impairment.loss to a percentage between 0 and 100."
+            f"Scenario must set network_impairment.loss to a percentage between 0 and 100."
         )
 
     return parsed_loss
 
 
 def _parse_network_impairment_bandwidth_limit(
-    path: Path,
     raw_network_impairment: dict[str, Any],
 ) -> int | None:
     raw_bandwidth_limit = raw_network_impairment.get("bandwidth_limit")
@@ -327,15 +307,13 @@ def _parse_network_impairment_bandwidth_limit(
         raw_bandwidth_limit
     ):
         raise ScenarioFileError(
-            "Scenario file "
-            f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
+            "Scenario must set network_impairment.bandwidth_limit to a rate like 1mbit."
         )
 
-    parsed_bandwidth_limit = _parse_bandwidth_limit_bps(path, raw_bandwidth_limit)
+    parsed_bandwidth_limit = _parse_bandwidth_limit_bps(raw_bandwidth_limit)
     if parsed_bandwidth_limit <= 0:
         raise ScenarioFileError(
-            "Scenario file "
-            f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
+            "Scenario must set network_impairment.bandwidth_limit to a rate like 1mbit."
         )
 
     return parsed_bandwidth_limit
@@ -353,7 +331,7 @@ def _parse_delay_seconds(raw_delay: str) -> float:
     return float(delay_value * _DELAY_FACTORS_BY_UNIT[delay_unit])
 
 
-def _parse_bandwidth_limit_bps(path: Path, raw_bandwidth_limit: str) -> int:
+def _parse_bandwidth_limit_bps(raw_bandwidth_limit: str) -> int:
     matched_unit = next(
         unit for unit in _BANDWIDTH_UNITS_BY_LENGTH if raw_bandwidth_limit.endswith(unit)
     )
@@ -361,8 +339,7 @@ def _parse_bandwidth_limit_bps(path: Path, raw_bandwidth_limit: str) -> int:
     parsed_bandwidth_limit = parsed_value * _BANDWIDTH_FACTORS_BY_UNIT[matched_unit]
     if parsed_bandwidth_limit != parsed_bandwidth_limit.to_integral_value():
         raise ScenarioFileError(
-            "Scenario file "
-            f"{path} must set network_impairment.bandwidth_limit to a rate like 1mbit."
+            "Scenario must set network_impairment.bandwidth_limit to a rate like 1mbit."
         )
 
     return int(parsed_bandwidth_limit)
