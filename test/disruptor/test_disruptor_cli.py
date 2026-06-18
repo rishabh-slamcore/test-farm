@@ -61,6 +61,62 @@ def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
     assert result.stderr == ""
 
 
+def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        (
+            "network_impairment:\n"
+            "  default:\n"
+            "    delay: 100ms\n"
+            "  overrides:\n"
+            "    - name: first-match\n"
+            "      selectors:\n"
+            "        - sc-aware-10\n"
+            "      impairment:\n"
+            "        loss: 25%\n"
+            "    - name: later-match\n"
+            "      selectors:\n"
+            "        - sc-aware-10\n"
+            "      impairment:\n"
+            "        delay: 10ms\n"
+            "    - name: control\n"
+            "      selectors:\n"
+            "        - sc-aware-11\n"
+            "      impairment: none\n"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "test_farm.disruptor_cli.discover_aware_devices",
+        lambda: tuple(discovered_devices(3)),
+    )
+    monkeypatch.setattr(
+        "test_farm.disruptor_cli.apply_disruptor_tc_plan",
+        lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [str(scenario_file), "--interface", "wlan0", "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "Disruptor dry-run plan for interface wlan0" in result.stdout
+    assert "sc-aware-10 192.0.2.10 -> first-match" in result.stdout
+    assert "sc-aware-11 192.0.2.11 -> control" in result.stdout
+    assert "sc-aware-12 192.0.2.12 -> default" in result.stdout
+    assert "later-match" not in result.stdout
+    assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem loss 25%" in result.stdout
+    assert "tc qdisc add dev wlan0 parent 1:20 handle 20: pfifo limit 1000" in result.stdout
+    assert "tc qdisc add dev wlan0 parent 1:30 handle 30: netem delay 100ms" in result.stdout
+    assert result.stderr == ""
+
+
 def test_disruptor_requires_interface(tmp_path: Path) -> None:
     scenario_file = tmp_path / "disruptor.yaml"
     scenario_file.write_text(

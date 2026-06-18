@@ -49,10 +49,20 @@ class DisruptorScenarioFileError(ScenarioFileError):
 
 @dataclass(frozen=True)
 class DisruptorScenario:
-    """The default-only Disruptor Scenario File contract."""
+    """The Disruptor Scenario File contract."""
 
     scenario_file: Path
-    default_impairment: NetworkImpairment
+    default_impairment: NetworkImpairment | None
+    overrides: tuple["DisruptorPolicyOverride", ...] = ()
+
+
+@dataclass(frozen=True)
+class DisruptorPolicyOverride:
+    """A named ordered Disruptor policy override."""
+
+    name: str
+    selectors: tuple[str, ...]
+    impairment: NetworkImpairment | None
 
 
 def load_scenario_file(path: Path) -> Scenario:
@@ -86,7 +96,7 @@ def load_scenario_file(path: Path) -> Scenario:
 
 
 def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
-    """Load and validate a default-only Disruptor Scenario File.
+    """Load and validate a Disruptor Scenario File.
 
     :param path: Path to the scenario YAML file.
     :returns: Parsed Disruptor scenario model.
@@ -122,27 +132,21 @@ def load_disruptor_scenario_file(path: Path) -> DisruptorScenario:
 
     _validate_scenario_fields(
         actual_fields={f"network_impairment.{field}" for field in raw_network_impairment},
-        expected_fields={"network_impairment.default"},
+        expected_fields={"network_impairment.default", "network_impairment.overrides"},
+        optional_fields={"network_impairment.overrides"},
     )
 
-    try:
-        default_impairment = _parse_network_impairment(
-            {"network_impairment": raw_network_impairment["default"]},
-        )
-    except ScenarioFileError as error:
-        message = str(error)
-        message = message.replace("Scenario file", "Disruptor Scenario File")
-        message = message.replace("network_impairment", "network_impairment.default")
-        raise DisruptorScenarioFileError(message) from error
-
-    if default_impairment is None:
-        raise DisruptorScenarioFileError(
-            f"Disruptor Scenario must set network_impairment.default to a mapping."
-        )
+    default_impairment = _parse_disruptor_impairment_policy(
+        raw_network_impairment["default"],
+        field_path="network_impairment.default",
+    )
 
     return DisruptorScenario(
         scenario_file=path,
         default_impairment=default_impairment,
+        overrides=_parse_disruptor_policy_overrides(
+            raw_network_impairment.get("overrides", []),
+        ),
     )
 
 
@@ -150,8 +154,11 @@ def _validate_scenario_fields(
     *,
     actual_fields: set[str],
     expected_fields: set[str],
+    optional_fields: set[str] | None = None,
 ) -> None:
-    if actual_fields == expected_fields:
+    optional_fields = optional_fields or set()
+    required_fields = expected_fields - optional_fields
+    if required_fields <= actual_fields <= expected_fields:
         return
 
     unknown_fields = actual_fields - expected_fields
@@ -161,11 +168,107 @@ def _validate_scenario_fields(
             f"Disruptor Scenario File contains unknown fields: {unknown_field_list}."
         )
 
-    missing_fields = expected_fields - actual_fields
+    missing_fields = required_fields - actual_fields
     missing_field_list = ", ".join(sorted(missing_fields))
     raise DisruptorScenarioFileError(
         f"Disruptor Scenario File is missing required field {missing_field_list}."
     )
+
+
+def _parse_disruptor_policy_overrides(
+    raw_overrides: Any,
+) -> tuple[DisruptorPolicyOverride, ...]:
+    if not isinstance(raw_overrides, list):
+        raise DisruptorScenarioFileError(
+            "Disruptor Scenario must set network_impairment.overrides to a sequence."
+        )
+
+    return tuple(
+        _parse_disruptor_policy_override(raw_override, override_index)
+        for override_index, raw_override in enumerate(raw_overrides)
+    )
+
+
+def _parse_disruptor_policy_override(
+    raw_override: Any,
+    override_index: int,
+) -> DisruptorPolicyOverride:
+    field_path = f"network_impairment.overrides[{override_index}]"
+    if not isinstance(raw_override, dict):
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path} to a mapping."
+        )
+
+    _validate_scenario_fields(
+        actual_fields={f"{field_path}.{field}" for field in raw_override},
+        expected_fields={
+            f"{field_path}.name",
+            f"{field_path}.selectors",
+            f"{field_path}.impairment",
+        },
+    )
+
+    raw_name = raw_override["name"]
+    if not isinstance(raw_name, str) or raw_name == "":
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path}.name to a non-empty string."
+        )
+
+    return DisruptorPolicyOverride(
+        name=raw_name,
+        selectors=_parse_disruptor_selectors(raw_override["selectors"], field_path),
+        impairment=_parse_disruptor_impairment_policy(
+            raw_override["impairment"],
+            field_path=f"{field_path}.impairment",
+        ),
+    )
+
+
+def _parse_disruptor_selectors(
+    raw_selectors: Any,
+    field_path: str,
+) -> tuple[str, ...]:
+    if not isinstance(raw_selectors, list) or raw_selectors == []:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path}.selectors to a non-empty sequence."
+        )
+
+    selectors: list[str] = []
+    for selector_index, raw_selector in enumerate(raw_selectors):
+        if not isinstance(raw_selector, str) or raw_selector == "":
+            raise DisruptorScenarioFileError(
+                "Disruptor Scenario must set "
+                f"{field_path}.selectors[{selector_index}] to a non-empty string."
+            )
+        selectors.append(raw_selector)
+
+    return tuple(selectors)
+
+
+def _parse_disruptor_impairment_policy(
+    raw_impairment_policy: Any,
+    *,
+    field_path: str,
+) -> NetworkImpairment | None:
+    if raw_impairment_policy == "none":
+        return None
+
+    try:
+        impairment = _parse_network_impairment(
+            {"network_impairment": raw_impairment_policy},
+        )
+    except ScenarioFileError as error:
+        message = str(error)
+        message = message.replace("Scenario file", "Disruptor Scenario File")
+        message = message.replace("network_impairment", field_path)
+        raise DisruptorScenarioFileError(message) from error
+
+    if impairment is None:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path} to a mapping or none."
+        )
+
+    return impairment
 
 
 def _parse_client_count(raw_data: dict[str, Any]) -> int:

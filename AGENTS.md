@@ -73,6 +73,9 @@ Before marking any Python work complete, verify:
 - Write tests for new features and bug fixes
 - Run the full test suite before marking work done
 - Prefer integration tests over mocks where practical
+- For Disruptor CLI work, add only one integration-style test to
+  `test/disruptor/test_disruptor_cli.py` per change; put additional policy,
+  parser, and planner coverage in lower-level Disruptor tests.
 
 ## Git Workflow
 - Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`

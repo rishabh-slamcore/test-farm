@@ -8,7 +8,7 @@ import typer
 
 from test_farm.disruptor import (
     apply_disruptor_tc_plan,
-    build_default_disruptor_tc_plan,
+    build_disruptor_tc_plan,
     discover_aware_devices,
     render_disruptor_dry_run,
 )
@@ -50,10 +50,10 @@ def run(
         logger.error(str(error))
         raise typer.Exit(code=2) from error
 
-    plan = build_default_disruptor_tc_plan(
+    plan = build_disruptor_tc_plan(
         interface_name=interface_name,
         devices=discover_aware_devices(),
-        default_impairment=scenario.default_impairment,
+        scenario=scenario,
     )
     if dry_run:
         typer.echo(render_disruptor_dry_run(plan), nl=False)
