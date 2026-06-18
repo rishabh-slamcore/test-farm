@@ -118,6 +118,7 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - A **Disruptor Scenario File** defines a default impairment policy plus optional device-specific overrides.
 - A **Disruptor Scenario File** applies its default impairment policy to every discovered Slamcore Aware device.
 - A **Disruptor Scenario File** evaluates device-specific overrides in order, and the first matching override determines that device's impairment policy.
+- A device-specific override in a **Disruptor Scenario File** may omit `name`; unnamed overrides receive generated names like `override-0` based on their ordered position.
 - A device-specific override in a **Disruptor Scenario File** replaces the default impairment policy rather than merging with it.
 - A **Disruptor Scenario File** can set an impairment policy to `none` to intentionally leave matched devices unimpaired.
 - A device-specific override in a **Disruptor Scenario File** can be active only during scheduled time windows.

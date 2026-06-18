@@ -70,6 +70,30 @@ def test_load_disruptor_scenario_file_parses_ordered_overrides(tmp_path: Path) -
     assert scenario.overrides[1].impairment is None
 
 
+def test_load_disruptor_scenario_file_assigns_name_to_unnamed_override(
+    tmp_path: Path,
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        (
+            "network_impairment:\n"
+            "  default:\n"
+            "    delay: 100ms\n"
+            "  overrides:\n"
+            "    - selectors:\n"
+            "        - sc-aware-10\n"
+            "      impairment:\n"
+            "        loss: 25%\n"
+        ),
+        encoding="utf-8",
+    )
+
+    scenario = load_disruptor_scenario_file(scenario_file)
+
+    assert scenario.overrides[0].name == "override-0"
+    assert scenario.overrides[0].selectors == ("sc-aware-10",)
+
+
 def test_load_disruptor_scenario_file_rejects_invalid_default_impairment(
     tmp_path: Path,
 ) -> None:

@@ -206,9 +206,10 @@ def _parse_disruptor_policy_override(
             f"{field_path}.selectors",
             f"{field_path}.impairment",
         },
+        optional_fields={f"{field_path}.name"},
     )
 
-    raw_name = raw_override["name"]
+    raw_name = raw_override.get("name", f"override-{override_index}")
     if not isinstance(raw_name, str) or raw_name == "":
         raise DisruptorScenarioFileError(
             f"Disruptor Scenario must set {field_path}.name to a non-empty string."
