@@ -4,6 +4,10 @@ from test_farm.network_impairment import NetworkImpairment
 from test_farm.scenario import Selector
 
 
+class TCSetupError(Exception):
+    """Raised when encountering some error while setting up TC commands"""
+
+
 @dataclass(frozen=True)
 class DiscoveredDevice:
     """A real Slamcore Aware device discovered by the Disruptor."""

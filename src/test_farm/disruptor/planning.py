@@ -12,6 +12,7 @@ from test_farm.network_impairment import (
     _format_delay,
     _format_loss,
     compute_burst,
+    netem_arguments,
     validate_burst,
 )
 from test_farm.scenario import DisruptorScenario, Selector
@@ -188,7 +189,7 @@ def _build_device_plan(
     elif impairment.bandwidth_limit is None:
         commands.append(
             f"tc qdisc add dev {interface_name} parent {class_id} handle {qdisc_handle} "
-            f"netem {' '.join(_netem_arguments(impairment))}"
+            f"netem {' '.join(netem_arguments(impairment))}"
         )
     else:
         burst = compute_burst(impairment.bandwidth_limit, mtu)
@@ -198,11 +199,11 @@ def _build_device_plan(
             f"tbf rate {_format_bandwidth_limit(impairment.bandwidth_limit)} "
             f"burst {burst} latency 50ms"
         )
-        netem_arguments = _netem_arguments(impairment)
-        if netem_arguments:
+        netem_args = netem_arguments(impairment)
+        if netem_args:
             commands.append(
                 f"tc qdisc add dev {interface_name} parent {qdisc_handle} handle {netem_handle} "
-                f"netem {' '.join(netem_arguments)}"
+                f"netem {' '.join(netem_args)}"
             )
 
     commands.append(
@@ -257,12 +258,3 @@ def _resolve_warnings(
                 DisruptorResolverWarning(policy_name=override.name, selector=override.selector)
             )
     return tuple(warnings)
-
-
-def _netem_arguments(network_impairment: NetworkImpairment) -> list[str]:
-    arguments: list[str] = []
-    if network_impairment.delay is not None:
-        arguments.extend(["delay", _format_delay(network_impairment.delay)])
-    if network_impairment.loss is not None:
-        arguments.extend(["loss", _format_loss(network_impairment.loss)])
-    return arguments

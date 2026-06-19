@@ -52,6 +52,15 @@ class NetworkImpairment:
     bandwidth_limit: int | None = None
 
 
+def netem_arguments(network_impairment: NetworkImpairment) -> list[str]:
+    arguments: list[str] = []
+    if network_impairment.delay is not None:
+        arguments.extend(["delay", _format_delay(network_impairment.delay)])
+    if network_impairment.loss is not None:
+        arguments.extend(["loss", _format_loss(network_impairment.loss)])
+    return arguments
+
+
 def router_tc_commands(
     *,
     network_impairment: NetworkImpairment,
@@ -59,14 +68,10 @@ def router_tc_commands(
 ) -> tuple[str, ...]:
     """Render tc commands for the supported Router Container impairment subset."""
 
-    netem_arguments: list[str] = []
-    if network_impairment.delay is not None:
-        netem_arguments.extend(["delay", _format_delay(network_impairment.delay)])
-    if network_impairment.loss is not None:
-        netem_arguments.extend(["loss", _format_loss(network_impairment.loss)])
+    netem_args = netem_arguments(network_impairment)
 
     if network_impairment.bandwidth_limit is None:
-        return (f"tc qdisc add dev {interface_name} root netem {' '.join(netem_arguments)}",)
+        return (f"tc qdisc add dev {interface_name} root netem {' '.join(netem_args)}",)
 
     nic = "wlp0s20f3"
     mtu = read_mtu(nic)
@@ -79,11 +84,11 @@ def router_tc_commands(
             f"tbf rate {_format_bandwidth_limit(network_impairment.bandwidth_limit)} burst {burst} latency {latency}"
         )
     ]
-    if netem_arguments:
+    if netem_args:
         commands.append(
             (
                 f"tc qdisc add dev {interface_name} parent 1:1 handle 10: "
-                f"netem {' '.join(netem_arguments)}"
+                f"netem {' '.join(netem_args)}"
             )
         )
 
