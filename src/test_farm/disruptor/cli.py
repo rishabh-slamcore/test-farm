@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from test_farm.disruptor import (
+from test_farm.disruptor.planning import (
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
     discover_aware_devices,

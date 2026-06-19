@@ -3,14 +3,12 @@
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
 from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
 from test_farm.cli import app as farm_app
-from test_farm.disruptor import DiscoveredDevice
-from test_farm.disruptor_cli import app
-from test_farm.scenario import DisruptorScenarioFileError
+from test_farm.disruptor.cli import app
+from test_farm.disruptor.models import DiscoveredDevice
 
 
 def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
@@ -30,11 +28,11 @@ def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor_cli.discover_aware_devices",
+        "test_farm.disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(2)),
     )
     monkeypatch.setattr(
-        "test_farm.disruptor_cli.apply_disruptor_tc_plan",
+        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
     )
     runner = CliRunner()
@@ -91,11 +89,11 @@ def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor_cli.discover_aware_devices",
+        "test_farm.disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(3)),
     )
     monkeypatch.setattr(
-        "test_farm.disruptor_cli.apply_disruptor_tc_plan",
+        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
     )
     runner = CliRunner()

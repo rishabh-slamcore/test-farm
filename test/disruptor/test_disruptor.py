@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from test_farm.disruptor import DiscoveredDevice, build_disruptor_tc_plan
+from test_farm.disruptor.models import DiscoveredDevice
+from test_farm.disruptor.planning import build_disruptor_tc_plan
 from test_farm.scenario import (
     DeviceNameMatch,
     DisruptorScenarioFileError,

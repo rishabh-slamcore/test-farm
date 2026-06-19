@@ -6,7 +6,7 @@ from collections.abc import Callable
 import pytest
 from pytest import Config, Item, MonkeyPatch, fixture
 
-from test_farm.disruptor import DiscoveredDevice
+from test_farm.disruptor.models import DiscoveredDevice
 
 DiscoveredDevicesFactory = Callable[[int], list[DiscoveredDevice]]
 
