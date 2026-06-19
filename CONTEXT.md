@@ -40,6 +40,14 @@ _Avoid_: Controller, Update Server, test-farm run
 A developer-authored YAML file describing the network impairment policy the Disruptor applies to discovered or selected real devices.
 _Avoid_: Scenario File, invocation file, bundle manifest
 
+**Device Name Match**:
+A Disruptor override selector declared as `device_match`, containing one or more exact discovered Slamcore Aware device names.
+_Avoid_: selectors list, IP match, glob match
+
+**Regex Match**:
+A Disruptor override selector declared as `regex_match`, containing one regular expression matched against discovered Slamcore Aware device names.
+_Avoid_: selectors list, wildcard, substring filter
+
 **Receipt**:
 A client-posted outcome observation delivered to the Controller over the Receipt Channel.
 For a successful download it includes a reported bundle; the Controller then derives the final client outcome.
@@ -119,13 +127,18 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - A **Disruptor Scenario File** applies its default impairment policy to every discovered Slamcore Aware device.
 - A **Disruptor Scenario File** evaluates device-specific overrides in order, and the first matching override determines that device's impairment policy.
 - A device-specific override in a **Disruptor Scenario File** may omit `name`; unnamed overrides receive generated names like `override-0` based on their ordered position.
+- A device-specific override in a **Disruptor Scenario File** must declare exactly one selector mode: `device_match` for exact device-name matching or `regex_match` for regular-expression matching.
+- `device_match` in a **Disruptor Scenario File** contains one or more discovered device names and replaces the previous generic `selectors` list field.
+- `regex_match` in a **Disruptor Scenario File** contains one regular expression matched against incoming discovered device names.
 - A device-specific override in a **Disruptor Scenario File** replaces the default impairment policy rather than merging with it.
 - A **Disruptor Scenario File** can set an impairment policy to `none` to intentionally leave matched devices unimpaired.
 - A device-specific override in a **Disruptor Scenario File** can be active only during scheduled time windows.
 - A scheduled override in a **Disruptor Scenario File** falls back to `none` outside its active window unless the file explicitly says otherwise.
 - A scheduled override in a **Disruptor Scenario File** can repeat as an active/inactive cycle until the **Disruptor** stops.
 - A **Disruptor Scenario File** selects devices through mDNS-resolved identities, not explicit IP literals.
-- A **Disruptor Scenario File** is applied best effort: unmatched device selectors are logged while matching discovered devices are still impaired.
+- A **Disruptor Scenario File** is applied best effort: override selectors that match no discovered devices are logged while matching discovered devices are still impaired.
+- A **Disruptor** emits a policy-resolution warning for an override selector only when every discovered device is unmatched by that selector.
+- A policy-resolution warning is informational only; selectors with at least one discovered-device match do not warn, even if their `device_match` list also names devices that were not discovered.
 - A **Disruptor** impairs traffic leaving the disruptor toward discovered device IPs; unrelated traffic to those devices is outside its control.
 - A **Disruptor** does not intentionally impair traffic from devices back toward the updater in v1.
 - A **Disruptor** impairs traffic while it is running; the external updater remains responsible for starting downloads and validating delivery success.

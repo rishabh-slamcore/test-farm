@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import yaml  # type: ignore[import-untyped]
 
@@ -56,12 +56,54 @@ class DisruptorScenario:
     overrides: tuple["DisruptorPolicyOverride", ...] = ()
 
 
+class Selector(Protocol):
+    """A device selector in a Disruptor policy override."""
+
+    def accept(self, device_name: str) -> bool:
+        """Return true if device_name matches selector."""
+        ...
+
+    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
+        """Return discovered device names that this selector does not match."""
+        ...
+
+
+@dataclass(frozen=True)
+class DeviceNameMatch:
+    """Match devices by exact discovered device name."""
+
+    device_names: set[str]
+
+    def accept(self, device_name: str) -> bool:
+        return device_name in self.device_names
+
+    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
+        return discovered_device_names - self.device_names
+
+
+@dataclass(frozen=True)
+class RegexMatch:
+    """Match devices with a regular expression against the discovered device name."""
+
+    pattern: str
+
+    def accept(self, device_name: str) -> bool:
+        return re.search(self.pattern, device_name) is not None
+
+    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
+        return set(
+            device_name
+            for device_name in discovered_device_names
+            if not self.accept(device_name)
+        )
+
+
 @dataclass(frozen=True)
 class DisruptorPolicyOverride:
     """A named ordered Disruptor policy override."""
 
     name: str
-    selectors: tuple[str, ...]
+    selector: Selector
     impairment: NetworkImpairment | None
 
 
@@ -203,10 +245,15 @@ def _parse_disruptor_policy_override(
         actual_fields={f"{field_path}.{field}" for field in raw_override},
         expected_fields={
             f"{field_path}.name",
-            f"{field_path}.selectors",
+            f"{field_path}.device_match",
+            f"{field_path}.regex_match",
             f"{field_path}.impairment",
         },
-        optional_fields={f"{field_path}.name"},
+        optional_fields={
+            f"{field_path}.name",
+            f"{field_path}.device_match",
+            f"{field_path}.regex_match",
+        },
     )
 
     raw_name = raw_override.get("name", f"override-{override_index}")
@@ -217,7 +264,7 @@ def _parse_disruptor_policy_override(
 
     return DisruptorPolicyOverride(
         name=raw_name,
-        selectors=_parse_disruptor_selectors(raw_override["selectors"], field_path),
+        selector=_parse_disruptor_selector(raw_override, field_path),
         impairment=_parse_disruptor_impairment_policy(
             raw_override["impairment"],
             field_path=f"{field_path}.impairment",
@@ -225,13 +272,39 @@ def _parse_disruptor_policy_override(
     )
 
 
-def _parse_disruptor_selectors(
+def _parse_disruptor_selector(
+    raw_override: dict[str, Any],
+    field_path: str,
+) -> Selector:
+    accepted_selector_types = ("device_match", "regex_match")
+    selector_type_count = sum(
+        selector_type in raw_override for selector_type in accepted_selector_types
+    )
+    if selector_type_count != 1:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set exactly one of "
+            f"{field_path}.device_match or {field_path}.regex_match."
+        )
+
+    if "device_match" in raw_override:
+        return _parse_device_selector(
+            raw_override["device_match"],
+            f"{field_path}.device_match",
+        )
+
+    return _parse_regex_selector(
+        raw_override["regex_match"],
+        f"{field_path}.regex_match",
+    )
+
+
+def _parse_device_selector(
     raw_selectors: Any,
     field_path: str,
-) -> tuple[str, ...]:
+) -> DeviceNameMatch:
     if not isinstance(raw_selectors, list) or raw_selectors == []:
         raise DisruptorScenarioFileError(
-            f"Disruptor Scenario must set {field_path}.selectors to a non-empty sequence."
+            f"Disruptor Scenario must set {field_path} to a non-empty sequence."
         )
 
     selectors: list[str] = []
@@ -239,11 +312,30 @@ def _parse_disruptor_selectors(
         if not isinstance(raw_selector, str) or raw_selector == "":
             raise DisruptorScenarioFileError(
                 "Disruptor Scenario must set "
-                f"{field_path}.selectors[{selector_index}] to a non-empty string."
+                f"{field_path}[{selector_index}] to a non-empty string."
             )
         selectors.append(raw_selector)
 
-    return tuple(selectors)
+    return DeviceNameMatch(set(selectors))
+
+
+def _parse_regex_selector(
+    raw_selector: Any,
+    field_path: str,
+) -> RegexMatch:
+    if not isinstance(raw_selector, str) or raw_selector == "":
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path} to a non-empty string."
+        )
+
+    try:
+        re.compile(raw_selector)
+    except re.error as error:
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path} to a valid regular expression."
+        ) from error
+
+    return RegexMatch(raw_selector)
 
 
 def _parse_disruptor_impairment_policy(

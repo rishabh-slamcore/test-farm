@@ -10,7 +10,7 @@ from test_farm.network_impairment import (
     compute_burst,
     validate_burst,
 )
-from test_farm.scenario import DisruptorScenario
+from test_farm.scenario import DisruptorScenario, Selector
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class DisruptorResolverWarning:
     """A structured policy-resolution warning."""
 
     policy_name: str
-    selector: str
+    selector: Selector
 
 
 def build_default_disruptor_tc_plan(
@@ -150,7 +150,8 @@ def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
         )
     for warning in plan.warnings:
         lines.append(
-            f"warning: selector {warning.selector} in policy {warning.policy_name} did not match a discovered device"
+            f"warning: selector in policy "
+            f"{warning.policy_name} did not match a discovered device"
         )
     lines.append("tc commands:")
     lines.extend(plan.commands)
@@ -250,9 +251,13 @@ def _build_device_plan(
     )
 
 
+def _does_device_match_selector(device: DiscoveredDevice, selector: Selector) -> bool:
+    return selector.accept(device.device_id)
+
+
 def _resolve_policy_name(device: DiscoveredDevice, scenario: DisruptorScenario) -> str:
     for override in scenario.overrides:
-        if device.device_id in override.selectors:
+        if _does_device_match_selector(device, override.selector):
             return override.name
 
     return "default"
@@ -263,7 +268,7 @@ def _resolve_impairment(
     scenario: DisruptorScenario,
 ) -> NetworkImpairment | None:
     for override in scenario.overrides:
-        if device.device_id in override.selectors:
+        if _does_device_match_selector(device, override.selector):
             return override.impairment
 
     return scenario.default_impairment
@@ -274,13 +279,17 @@ def _resolve_warnings(
     scenario: DisruptorScenario,
     devices: tuple[DiscoveredDevice, ...],
 ) -> tuple[DisruptorResolverWarning, ...]:
-    discovered_device_ids = {device.device_id for device in devices}
-    return tuple(
-        DisruptorResolverWarning(policy_name=override.name, selector=selector)
-        for override in scenario.overrides
-        for selector in override.selectors
-        if selector not in discovered_device_ids
-    )
+    warnings: list[DisruptorResolverWarning] = []
+    discovered_device_ids = set(device.device_id for device in devices)
+    for override in scenario.overrides:
+        if (
+            override.selector.unmatched_devices(discovered_device_names=discovered_device_ids)
+            == discovered_device_ids
+        ):
+            warnings.append(
+                DisruptorResolverWarning(policy_name=override.name, selector=override.selector)
+            )
+    return tuple(warnings)
 
 
 def _netem_arguments(network_impairment: NetworkImpairment) -> list[str]:
