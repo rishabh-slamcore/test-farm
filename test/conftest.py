@@ -1,11 +1,12 @@
 """Shared pytest fixtures for test suite."""
 
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 import pytest
 from pytest import Config, Item, MonkeyPatch, fixture
 
+from test_farm.disruptor.device_tree import HandleManager
 from test_farm.disruptor.models import DiscoveredDevice
 
 DiscoveredDevicesFactory = Callable[[int], list[DiscoveredDevice]]
@@ -78,14 +79,22 @@ def reachable_update_server_bind_address(bind_address_factory: Callable[[], str]
 
 
 @pytest.fixture
-def discovered_devices() -> DiscoveredDevicesFactory:
+def discovered_devices() -> Generator[DiscoveredDevicesFactory, None, None]:
+    created_devices: list[DiscoveredDevice] = []
+
     def build_discovered_devices(device_count: int) -> list[DiscoveredDevice]:
-        return [
+        devices = [
             DiscoveredDevice(
-                device_id=f"sc-aware-{index+10}",
+                device_id=f"sc-aware-{index + 10}",
                 ip_address=f"192.0.2.{index + 10}",
             )
             for index in range(device_count)
         ]
+        created_devices[:] = devices
+        HandleManager.clear()
+        HandleManager.setup(devices)
+        return devices
 
-    return build_discovered_devices
+    yield build_discovered_devices
+
+    HandleManager.clear()

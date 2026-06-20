@@ -1,5 +1,6 @@
 """Disruptor scenario parsing and dry-run tc planning."""
 
+from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
 from test_farm.disruptor.models import (
     DiscoveredDevice,
     DisruptorResolverWarning,
@@ -18,48 +19,6 @@ from test_farm.network_impairment import (
 from test_farm.scenario import DisruptorScenario, Selector
 
 
-def build_default_disruptor_tc_plan(
-    *,
-    interface_name: str,
-    devices: tuple[DiscoveredDevice, ...],
-    default_impairment: NetworkImpairment,
-    mtu: int = 1500,
-) -> DisruptorTcPlan:
-    """Resolve every discovered device to the default impairment policy.
-
-    :param interface_name: Client-facing NIC name.
-    :param devices: Discovered devices to impair.
-    :param default_impairment: Impairment applied to every discovered device.
-    :param mtu: Interface MTU used for TBF burst planning.
-    :returns: Typed tc plan object.
-    """
-
-    root_commands = [
-        f"tc qdisc add dev {interface_name} root handle 1: htb default 99",
-        f"tc class add dev {interface_name} parent 1: classid 1:1 htb rate 1000mbit",
-        f"tc class add dev {interface_name} parent 1:1 classid 1:99 htb rate 1000mbit",
-        f"tc qdisc add dev {interface_name} parent 1:99 handle 99: pfifo limit 1000",
-    ]
-    device_plans = tuple(
-        _build_default_device_plan(
-            interface_name=interface_name,
-            device=device,
-            device_index=device_index,
-            default_impairment=default_impairment,
-            mtu=mtu,
-        )
-        for device_index, device in enumerate(devices, start=1)
-    )
-    commands = tuple(root_commands) + tuple(
-        command for device_plan in device_plans for command in device_plan.commands
-    )
-    return DisruptorTcPlan(
-        interface_name=interface_name,
-        device_plans=device_plans,
-        commands=commands,
-    )
-
-
 def build_disruptor_tc_plan(
     *,
     interface_name: str,
@@ -75,31 +34,19 @@ def build_disruptor_tc_plan(
     :param mtu: Interface MTU used for TBF burst planning.
     :returns: Typed tc plan object.
     """
+    HandleManager.clear()
+    HandleManager.setup(devices)
+    root_tc_tree = HTBTree(interface_name)
 
-    root_commands = [
-        f"tc qdisc add dev {interface_name} root handle 1: htb default 99",
-        f"tc class add dev {interface_name} parent 1: classid 1:1 htb rate 1000mbit",
-        f"tc class add dev {interface_name} parent 1:1 classid 1:99 htb rate 1000mbit",
-        f"tc qdisc add dev {interface_name} parent 1:99 handle 99: pfifo limit 1000",
-    ]
-    device_plans = tuple(
-        _build_device_plan(
-            interface_name=interface_name,
-            device=device,
-            device_index=device_index,
-            policy_name=_resolve_policy_name(device, scenario),
-            impairment=_resolve_impairment(device, scenario),
-            mtu=mtu,
-        )
-        for device_index, device in enumerate(devices, start=1)
-    )
-    commands = tuple(root_commands) + tuple(
-        command for device_plan in device_plans for command in device_plan.commands
-    )
+    for device in devices:
+        impairment = _resolve_impairment(device, scenario)
+        qdisc = allocate_qdisc(impairment)
+        root_tc_tree.add_node(device=device, qdisc=qdisc)
+
     return DisruptorTcPlan(
         interface_name=interface_name,
-        device_plans=device_plans,
-        commands=commands,
+        routing_tree=root_tc_tree,
+        scenario=scenario,
         warnings=_resolve_warnings(scenario=scenario, devices=devices),
     )
 
@@ -112,9 +59,9 @@ def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
     """
 
     lines = [f"Disruptor dry-run plan for interface {plan.interface_name}"]
-    for device_plan in plan.device_plans:
+    for node in plan.routing_tree:
         lines.append(
-            f"{device_plan.device.device_id} {device_plan.device.ip_address} -> {device_plan.policy_name}"
+            f"{node.device.device_id} {node.device.ip_address} -> {resolve_policy_name(node.device, plan.scenario)}"
         )
     for warning in plan.warnings:
         lines.append(
@@ -122,7 +69,7 @@ def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
             f"{warning.policy_name} did not match a discovered device"
         )
     lines.append("tc commands:")
-    lines.extend(plan.commands)
+    lines.extend(plan.routing_tree.pending_commands())
     return "\n".join(lines) + "\n"
 
 
@@ -146,84 +93,11 @@ def discover_aware_devices() -> tuple[DiscoveredDevice, ...]:
     return ()
 
 
-def _build_default_device_plan(
-    *,
-    interface_name: str,
-    device: DiscoveredDevice,
-    device_index: int,
-    default_impairment: NetworkImpairment,
-    mtu: int,
-) -> DisruptorTcDevicePlan:
-    return _build_device_plan(
-        interface_name=interface_name,
-        device=device,
-        device_index=device_index,
-        policy_name="default",
-        impairment=default_impairment,
-        mtu=mtu,
-    )
-
-
-def _build_device_plan(
-    *,
-    interface_name: str,
-    device: DiscoveredDevice,
-    device_index: int,
-    policy_name: str,
-    impairment: NetworkImpairment | None,
-    mtu: int,
-) -> DisruptorTcDevicePlan:
-    class_minor = device_index * 10
-    class_id = f"1:{class_minor}"
-    qdisc_handle = f"{class_minor}:"
-    netem_handle = f"{class_minor * 10}:"
-    commands = [
-        f"tc class add dev {interface_name} parent 1:1 classid {class_id} htb rate 1000mbit",
-    ]
-
-    if impairment is None:
-        commands.append(
-            f"tc qdisc add dev {interface_name} parent {class_id} handle {qdisc_handle} "
-            "pfifo limit 1000"
-        )
-    elif impairment.bandwidth_limit is None:
-        commands.append(
-            f"tc qdisc add dev {interface_name} parent {class_id} handle {qdisc_handle} "
-            f"netem {' '.join(netem_arguments(impairment))}"
-        )
-    else:
-        burst = compute_burst(impairment.bandwidth_limit, mtu)
-        validate_burst(burst, mtu, impairment.bandwidth_limit)
-        commands.append(
-            f"tc qdisc add dev {interface_name} parent {class_id} handle {qdisc_handle} "
-            f"tbf rate {_format_bandwidth_limit(impairment.bandwidth_limit)} "
-            f"burst {burst} latency 50ms"
-        )
-        netem_args = netem_arguments(impairment)
-        if netem_args:
-            commands.append(
-                f"tc qdisc add dev {interface_name} parent {qdisc_handle} handle {netem_handle} "
-                f"netem {' '.join(netem_args)}"
-            )
-
-    commands.append(
-        f"tc filter add dev {interface_name} parent 1: protocol ip prio {device_index} "
-        f"u32 match ip dst {device.ip_address}/32 flowid {class_id}"
-    )
-    return DisruptorTcDevicePlan(
-        device=device,
-        policy_name=policy_name,
-        impairment=impairment,
-        class_id=class_id,
-        commands=tuple(commands),
-    )
-
-
 def _does_device_match_selector(device: DiscoveredDevice, selector: Selector) -> bool:
     return selector.accept(device.device_id)
 
 
-def _resolve_policy_name(device: DiscoveredDevice, scenario: DisruptorScenario) -> str:
+def resolve_policy_name(device: DiscoveredDevice, scenario: DisruptorScenario) -> str:
     for override in scenario.overrides:
         if _does_device_match_selector(device, override.selector):
             return override.name

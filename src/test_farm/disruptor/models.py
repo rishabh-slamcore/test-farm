@@ -1,7 +1,12 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from test_farm.disruptor.device_tree import HTBTree
+
+from test_farm import scenario
 from test_farm.network_impairment import NetworkImpairment
-from test_farm.scenario import Selector
+from test_farm.scenario import DisruptorScenario, Selector
 
 
 class TCSetupError(Exception):
@@ -32,8 +37,8 @@ class DisruptorTcPlan:
     """A typed tc plan for one dry-run Disruptor invocation."""
 
     interface_name: str
-    device_plans: tuple[DisruptorTcDevicePlan, ...]
-    commands: tuple[str, ...]
+    routing_tree: "HTBTree"
+    scenario: DisruptorScenario
     warnings: tuple["DisruptorResolverWarning", ...] = ()
 
 

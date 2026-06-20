@@ -51,7 +51,7 @@ def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
         "192.0.2.10/32 flowid 1:10"
     ) in result.stdout
     assert (
-        "tc filter add dev wlan0 parent 1: protocol ip prio 2 u32 match ip dst "
+        "tc filter add dev wlan0 parent 1: protocol ip prio 1 u32 match ip dst "
         "192.0.2.11/32 flowid 1:20"
     ) in result.stdout
     assert "netem delay 100ms loss 5%" in result.stdout
@@ -110,7 +110,7 @@ def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
     assert "sc-aware-12 192.0.2.12 -> default" in result.stdout
     assert "later-match" not in result.stdout
     assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem loss 25%" in result.stdout
-    assert "tc qdisc add dev wlan0 parent 1:20 handle 20: pfifo limit 1000" in result.stdout
+    assert "tc qdisc add dev wlan0 parent 1:20 handle 20: pfifo limit 10000" in result.stdout
     assert "tc qdisc add dev wlan0 parent 1:30 handle 30: netem delay 100ms" in result.stdout
     assert result.stderr == ""
 
