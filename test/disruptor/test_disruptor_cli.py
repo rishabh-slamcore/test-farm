@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from test_farm.cli import app as farm_app
 from test_farm.disruptor.cli import app
-from test_farm.disruptor.models import DiscoveredDevice
+from test_farm.disruptor.models import DiscoveredDevice, DisruptorTcExecutionError
 
 
 def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
@@ -113,6 +113,67 @@ def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
     assert "tc qdisc add dev wlan0 parent 1:20 handle 20: pfifo limit 10000" in result.stdout
     assert "tc qdisc add dev wlan0 parent 1:30 handle 30: netem delay 100ms" in result.stdout
     assert result.stderr == ""
+
+
+def test_disruptor_non_dry_run_applies_plan_for_explicit_interface(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "test_farm.disruptor.cli.discover_aware_devices",
+        lambda: tuple(discovered_devices(1)),
+    )
+    applied_interfaces: list[str] = []
+    monkeypatch.setattr(
+        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        lambda plan: applied_interfaces.append(plan.interface_name),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, [str(scenario_file), "--interface", "wlan0"])
+
+    assert result.exit_code == 0
+    assert applied_interfaces == ["wlan0"]
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_disruptor_non_dry_run_reports_tc_capability_error(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "test_farm.disruptor.cli.discover_aware_devices",
+        lambda: tuple(discovered_devices(1)),
+    )
+    monkeypatch.setattr(
+        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        lambda plan: (_ for _ in ()).throw(
+            DisruptorTcExecutionError(
+                "RTNETLINK answers: Operation not permitted\n"
+                "Disruptor requires CAP_NET_ADMIN to modify tc state."
+            )
+        ),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(app, [str(scenario_file), "--interface", "wlan0"])
+
+    assert result.exit_code == 1
+    assert "Operation not permitted" in result.stderr
+    assert "CAP_NET_ADMIN" in result.stderr
 
 
 def test_disruptor_requires_interface(tmp_path: Path) -> None:

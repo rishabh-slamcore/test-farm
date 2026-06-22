@@ -13,6 +13,10 @@ class TCSetupError(Exception):
     """Raised when encountering some error while setting up TC commands"""
 
 
+class DisruptorTcExecutionError(Exception):
+    """Raised when applying Disruptor tc commands fails."""
+
+
 @dataclass(frozen=True)
 class DiscoveredDevice:
     """A real Slamcore Aware device discovered by the Disruptor."""

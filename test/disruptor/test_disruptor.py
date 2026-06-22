@@ -1,12 +1,21 @@
 """Disruptor scenario and planning tests."""
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
+from subprocess import CompletedProcess
+from threading import Event
 
 import pytest
 
-from test_farm.disruptor.models import DiscoveredDevice, TCSetupError
+from test_farm.disruptor.models import (
+    DiscoveredDevice,
+    DisruptorTcExecutionError,
+    TCSetupError,
+)
 from test_farm.disruptor.planning import (
+    SubprocessDisruptorTcExecutor,
+    apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
     render_disruptor_dry_run,
     resolve_policy_name,
@@ -577,3 +586,102 @@ def test_disruptor_tc_plan_warns_for_unmatched_regex_selector(
         "default"
     ]
     assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-batch",)]
+
+
+class RecordingTcExecutor:
+    def __init__(self, applied_event: Event) -> None:
+        self.operations: list[tuple[str, str]] = []
+        self._applied_event = applied_event
+
+    def delete_root_qdisc(self, interface_name: str) -> None:
+        self.operations.append(("delete-root", interface_name))
+
+    def run(self, command: str) -> None:
+        self.operations.append(("run", command))
+        if command.startswith("tc filter add"):
+            self._applied_event.set()
+
+
+def test_apply_disruptor_tc_plan_cleans_up_applies_blocks_and_tears_down(
+    tmp_path: Path,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    asyncio.run(
+        _assert_apply_disruptor_tc_plan_cleans_up_applies_blocks_and_tears_down(
+            tmp_path=tmp_path,
+            discovered_devices=discovered_devices,
+        )
+    )
+
+
+async def _assert_apply_disruptor_tc_plan_cleans_up_applies_blocks_and_tears_down(
+    *,
+    tmp_path: Path,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    scenario = load_disruptor_scenario_file(scenario_file)
+    plan = build_disruptor_tc_plan(
+        interface_name="wlan0",
+        devices=tuple(discovered_devices(1)),
+        scenario=scenario,
+    )
+    applied_event = Event()
+    stop_event = Event()
+    executor = RecordingTcExecutor(applied_event=applied_event)
+    lifecycle_task = asyncio.create_task(
+        asyncio.to_thread(
+            apply_disruptor_tc_plan,
+            plan,
+            executor=executor,
+            stop_event=stop_event,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(applied_event.wait, timeout=1)
+        assert not lifecycle_task.done()
+        assert executor.operations[0] == ("delete-root", "wlan0")
+        assert executor.operations.count(("delete-root", "wlan0")) == 1
+        assert (
+            "run",
+            "tc qdisc add dev wlan0 parent 1:10 handle 10: netem delay 100ms",
+        ) in executor.operations
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(lifecycle_task, timeout=1)
+
+    assert lifecycle_task.done()
+    assert executor.operations[-1] == ("delete-root", "wlan0")
+    assert executor.operations.count(("delete-root", "wlan0")) == 2
+
+
+def test_subprocess_disruptor_tc_executor_explains_missing_net_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def deny_tc_command(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> CompletedProcess[str]:
+        del capture_output, text, check
+        return CompletedProcess(
+            args=args,
+            returncode=2,
+            stdout="",
+            stderr="RTNETLINK answers: Operation not permitted\n",
+        )
+
+    monkeypatch.setattr("test_farm.disruptor.planning.subprocess.run", deny_tc_command)
+    executor = SubprocessDisruptorTcExecutor()
+
+    with pytest.raises(
+        DisruptorTcExecutionError,
+        match="CAP_NET_ADMIN",
+    ):
+        executor.delete_root_qdisc("wlan0")

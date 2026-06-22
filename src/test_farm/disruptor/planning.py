@@ -1,10 +1,16 @@
-"""Disruptor scenario parsing and dry-run tc planning."""
+"""Disruptor scenario parsing and tc planning."""
+
+import shlex
+import subprocess
+from threading import Event
+from typing import Protocol
 
 from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
 from test_farm.disruptor.models import (
     DiscoveredDevice,
     DisruptorResolverWarning,
     DisruptorTcDevicePlan,
+    DisruptorTcExecutionError,
     DisruptorTcPlan,
 )
 from test_farm.network_impairment import (
@@ -17,6 +23,55 @@ from test_farm.network_impairment import (
     validate_burst,
 )
 from test_farm.scenario import DisruptorScenario, Selector
+
+
+class DisruptorTcExecutor(Protocol):
+    """Executor for applying rendered Disruptor tc commands."""
+
+    def delete_root_qdisc(self, interface_name: str) -> None:
+        """Delete the root qdisc from an interface if one exists."""
+
+    def run(self, command: str) -> None:
+        """Run one rendered tc command."""
+
+
+class SubprocessDisruptorTcExecutor:
+    """Apply Disruptor tc commands through the local ``tc`` binary."""
+
+    def delete_root_qdisc(self, interface_name: str) -> None:
+        command = ["tc", "qdisc", "del", "dev", interface_name, "root"]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode == 0 or "No such file or directory" in result.stderr:
+            return
+
+        _raise_tc_execution_error(command=command, result=result)
+
+    def run(self, command: str) -> None:
+        args = shlex.split(command)
+        result = subprocess.run(args, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            _raise_tc_execution_error(command=args, result=result)
+
+
+def _raise_tc_execution_error(
+    *,
+    command: list[str],
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    stderr = result.stderr.strip()
+    stdout = result.stdout.strip()
+    detail = stderr or stdout or "tc exited with no diagnostic output"
+    if "Operation not permitted" in stderr:
+        detail = (
+            f"{detail}\n"
+            "Disruptor requires CAP_NET_ADMIN to modify tc state. "
+            "Run as root, grant CAP_NET_ADMIN to the process, or run the container "
+            "with NET_ADMIN capability."
+        )
+
+    raise DisruptorTcExecutionError(
+        f"tc command failed with exit code {result.returncode}: {' '.join(command)}\n{detail}"
+    )
 
 
 def build_disruptor_tc_plan(
@@ -73,15 +128,28 @@ def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
     return "\n".join(lines) + "\n"
 
 
-def apply_disruptor_tc_plan(plan: DisruptorTcPlan) -> None:
+def apply_disruptor_tc_plan(
+    plan: DisruptorTcPlan,
+    *,
+    executor: DisruptorTcExecutor | None = None,
+    stop_event: Event | None = None,
+) -> None:
     """Apply a Disruptor tc plan.
 
     :param plan: Typed tc plan to apply.
-    :raises NotImplementedError: Always in the first dry-run-only slice.
+    :param executor: Executor used to mutate tc state.
+    :param stop_event: Optional event that ends the blocking lifecycle when set.
     """
 
-    del plan
-    raise NotImplementedError("Only Disruptor --dry-run is implemented.")
+    tc_executor = executor or SubprocessDisruptorTcExecutor()
+    lifecycle_stop = stop_event or Event()
+    try:
+        tc_executor.delete_root_qdisc(plan.interface_name)
+        for command in plan.routing_tree.pending_commands():
+            tc_executor.run(command)
+        lifecycle_stop.wait()
+    finally:
+        tc_executor.delete_root_qdisc(plan.interface_name)
 
 
 def discover_aware_devices() -> tuple[DiscoveredDevice, ...]:
