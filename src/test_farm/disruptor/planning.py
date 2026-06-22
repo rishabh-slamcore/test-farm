@@ -41,7 +41,7 @@ class SubprocessExecutor:
     def delete_root_qdisc(self, interface_name: str) -> None:
         command = ["tc", "qdisc", "del", "dev", interface_name, "root"]
         result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode == 0 or "No such file or directory" in result.stderr:
+        if result.returncode == 0 or _tc_root_qdisc_absent(result.stderr):
             return
 
         _raise_tc_execution_error(command=command, result=result)
@@ -71,6 +71,13 @@ def _raise_tc_execution_error(
 
     raise TCExecutionError(
         f"tc command failed with exit code {result.returncode}: {' '.join(command)}\n{detail}"
+    )
+
+
+def _tc_root_qdisc_absent(stderr: str) -> bool:
+    return (
+        "No such file or directory" in stderr
+        or "Cannot delete qdisc with handle of zero" in stderr
     )
 
 

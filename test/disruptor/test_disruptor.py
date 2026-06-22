@@ -681,3 +681,27 @@ def test_subprocess_disruptor_tc_executor_explains_missing_net_admin(
         match="CAP_NET_ADMIN",
     ):
         executor.delete_root_qdisc("wlan0")
+
+
+def test_subprocess_disruptor_tc_executor_ignores_absent_zero_handle_root_qdisc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def deny_tc_command(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> CompletedProcess[str]:
+        del args, capture_output, text, check
+        return CompletedProcess(
+            args=["tc", "qdisc", "del", "dev", "wlan0", "root"],
+            returncode=2,
+            stdout="",
+            stderr="Error: Cannot delete qdisc with handle of zero.\n",
+        )
+
+    monkeypatch.setattr("test_farm.disruptor.planning.subprocess.run", deny_tc_command)
+    executor = SubprocessExecutor()
+
+    executor.delete_root_qdisc("wlan0")
