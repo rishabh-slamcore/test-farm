@@ -13,7 +13,7 @@ class TCSetupError(Exception):
     """Raised when encountering some error while setting up TC commands"""
 
 
-class DisruptorTcExecutionError(Exception):
+class TCExecutionError(Exception):
     """Raised when applying Disruptor tc commands fails."""
 
 
@@ -26,7 +26,7 @@ class DiscoveredDevice:
 
 
 @dataclass(frozen=True)
-class DisruptorTcDevicePlan:
+class TCDevicePlan:
     """A device-specific resolved tc plan lane."""
 
     device: DiscoveredDevice
@@ -37,17 +37,17 @@ class DisruptorTcDevicePlan:
 
 
 @dataclass(frozen=True)
-class DisruptorTcPlan:
+class TCPlan:
     """A typed tc plan for one dry-run Disruptor invocation."""
 
     interface_name: str
     routing_tree: "HTBTree"
     scenario: DisruptorScenario
-    warnings: tuple["DisruptorResolverWarning", ...] = ()
+    warnings: tuple["ResolverWarning", ...] = ()
 
 
 @dataclass(frozen=True)
-class DisruptorResolverWarning:
+class ResolverWarning:
     """A structured policy-resolution warning."""
 
     policy_name: str

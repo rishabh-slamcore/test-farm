@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from test_farm.cli import app as farm_app
 from test_farm.disruptor.cli import app
-from test_farm.disruptor.models import DiscoveredDevice, DisruptorTcExecutionError
+from test_farm.disruptor.models import DiscoveredDevice, TCExecutionError
 
 
 def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
@@ -161,7 +161,7 @@ def test_disruptor_non_dry_run_reports_tc_capability_error(
     monkeypatch.setattr(
         "test_farm.disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(
-            DisruptorTcExecutionError(
+            TCExecutionError(
                 "RTNETLINK answers: Operation not permitted\n"
                 "Disruptor requires CAP_NET_ADMIN to modify tc state."
             )

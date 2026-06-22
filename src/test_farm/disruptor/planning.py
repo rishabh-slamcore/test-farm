@@ -8,10 +8,10 @@ from typing import Protocol
 from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
 from test_farm.disruptor.models import (
     DiscoveredDevice,
-    DisruptorResolverWarning,
-    DisruptorTcDevicePlan,
-    DisruptorTcExecutionError,
-    DisruptorTcPlan,
+    ResolverWarning,
+    TCDevicePlan,
+    TCExecutionError,
+    TCPlan,
 )
 from test_farm.network_impairment import (
     NetworkImpairment,
@@ -25,7 +25,7 @@ from test_farm.network_impairment import (
 from test_farm.scenario import DisruptorScenario, Selector
 
 
-class DisruptorTcExecutor(Protocol):
+class TCExecutor(Protocol):
     """Executor for applying rendered Disruptor tc commands."""
 
     def delete_root_qdisc(self, interface_name: str) -> None:
@@ -35,7 +35,7 @@ class DisruptorTcExecutor(Protocol):
         """Run one rendered tc command."""
 
 
-class SubprocessDisruptorTcExecutor:
+class SubprocessExecutor:
     """Apply Disruptor tc commands through the local ``tc`` binary."""
 
     def delete_root_qdisc(self, interface_name: str) -> None:
@@ -69,7 +69,7 @@ def _raise_tc_execution_error(
             "with NET_ADMIN capability."
         )
 
-    raise DisruptorTcExecutionError(
+    raise TCExecutionError(
         f"tc command failed with exit code {result.returncode}: {' '.join(command)}\n{detail}"
     )
 
@@ -80,7 +80,7 @@ def build_disruptor_tc_plan(
     devices: tuple[DiscoveredDevice, ...],
     scenario: DisruptorScenario,
     mtu: int = 1500,
-) -> DisruptorTcPlan:
+) -> TCPlan:
     """Resolve a parsed Disruptor scenario to a typed tc plan.
 
     :param interface_name: Client-facing NIC name.
@@ -98,7 +98,7 @@ def build_disruptor_tc_plan(
         qdisc = allocate_qdisc(impairment)
         root_tc_tree.add_node(device=device, qdisc=qdisc)
 
-    return DisruptorTcPlan(
+    return TCPlan(
         interface_name=interface_name,
         routing_tree=root_tc_tree,
         scenario=scenario,
@@ -106,7 +106,7 @@ def build_disruptor_tc_plan(
     )
 
 
-def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
+def render_disruptor_dry_run(plan: TCPlan) -> str:
     """Render a human-readable dry-run plan.
 
     :param plan: Typed tc plan to render.
@@ -129,9 +129,9 @@ def render_disruptor_dry_run(plan: DisruptorTcPlan) -> str:
 
 
 def apply_disruptor_tc_plan(
-    plan: DisruptorTcPlan,
+    plan: TCPlan,
     *,
-    executor: DisruptorTcExecutor | None = None,
+    executor: TCExecutor | None = None,
     stop_event: Event | None = None,
 ) -> None:
     """Apply a Disruptor tc plan.
@@ -141,7 +141,7 @@ def apply_disruptor_tc_plan(
     :param stop_event: Optional event that ends the blocking lifecycle when set.
     """
 
-    tc_executor = executor or SubprocessDisruptorTcExecutor()
+    tc_executor = executor or SubprocessExecutor()
     lifecycle_stop = stop_event or Event()
     try:
         tc_executor.delete_root_qdisc(plan.interface_name)
@@ -188,8 +188,8 @@ def _resolve_warnings(
     *,
     scenario: DisruptorScenario,
     devices: tuple[DiscoveredDevice, ...],
-) -> tuple[DisruptorResolverWarning, ...]:
-    warnings: list[DisruptorResolverWarning] = []
+) -> tuple[ResolverWarning, ...]:
+    warnings: list[ResolverWarning] = []
     discovered_device_ids = set(device.device_id for device in devices)
     for override in scenario.overrides:
         if (
@@ -197,6 +197,6 @@ def _resolve_warnings(
             == discovered_device_ids
         ):
             warnings.append(
-                DisruptorResolverWarning(policy_name=override.name, selector=override.selector)
+                ResolverWarning(policy_name=override.name, selector=override.selector)
             )
     return tuple(warnings)

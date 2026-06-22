@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from test_farm.disruptor.models import DisruptorTcExecutionError
+from test_farm.disruptor.models import TCExecutionError
 from test_farm.disruptor.planning import (
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
@@ -65,7 +65,7 @@ def run(
     except KeyboardInterrupt:
         logger.info("Interrupted; Disruptor tc state cleaned up.")
         raise typer.Exit(code=0) from None
-    except DisruptorTcExecutionError as error:
+    except TCExecutionError as error:
         logger.error(str(error))
         raise typer.Exit(code=1) from error
 

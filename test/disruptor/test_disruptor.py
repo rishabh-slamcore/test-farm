@@ -8,13 +8,9 @@ from threading import Event
 
 import pytest
 
-from test_farm.disruptor.models import (
-    DiscoveredDevice,
-    DisruptorTcExecutionError,
-    TCSetupError,
-)
+from test_farm.disruptor.models import DiscoveredDevice, TCExecutionError, TCSetupError
 from test_farm.disruptor.planning import (
-    SubprocessDisruptorTcExecutor,
+    SubprocessExecutor,
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
     render_disruptor_dry_run,
@@ -588,7 +584,7 @@ def test_disruptor_tc_plan_warns_for_unmatched_regex_selector(
     assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-batch",)]
 
 
-class RecordingTcExecutor:
+class RecordingTCExecutor:
     def __init__(self, applied_event: Event) -> None:
         self.operations: list[tuple[str, str]] = []
         self._applied_event = applied_event
@@ -632,7 +628,7 @@ async def _assert_apply_disruptor_tc_plan_cleans_up_applies_blocks_and_tears_dow
     )
     applied_event = Event()
     stop_event = Event()
-    executor = RecordingTcExecutor(applied_event=applied_event)
+    executor = RecordingTCExecutor(applied_event=applied_event)
     lifecycle_task = asyncio.create_task(
         asyncio.to_thread(
             apply_disruptor_tc_plan,
@@ -678,10 +674,10 @@ def test_subprocess_disruptor_tc_executor_explains_missing_net_admin(
         )
 
     monkeypatch.setattr("test_farm.disruptor.planning.subprocess.run", deny_tc_command)
-    executor = SubprocessDisruptorTcExecutor()
+    executor = SubprocessExecutor()
 
     with pytest.raises(
-        DisruptorTcExecutionError,
+        TCExecutionError,
         match="CAP_NET_ADMIN",
     ):
         executor.delete_root_qdisc("wlan0")
