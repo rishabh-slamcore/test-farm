@@ -9,6 +9,7 @@ from pytest import Config, Item, MonkeyPatch, fixture
 from test_farm.disruptor.device_tree import HandleManager
 from test_farm.disruptor.models import DiscoveredDevice
 
+DEFAULT_TEST_DEVICE_VARIANT = "mk3a"
 DiscoveredDevicesFactory = Callable[[int], list[DiscoveredDevice]]
 
 
@@ -87,6 +88,7 @@ def discovered_devices() -> Generator[DiscoveredDevicesFactory, None, None]:
             DiscoveredDevice(
                 device_id=f"sc-aware-{index + 10}",
                 ip_address=f"192.0.2.{index + 10}",
+                variant=DEFAULT_TEST_DEVICE_VARIANT,
             )
             for index in range(device_count)
         ]

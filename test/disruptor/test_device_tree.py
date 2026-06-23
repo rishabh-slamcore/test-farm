@@ -56,8 +56,8 @@ def test_htb_tree_clears_pending_commands() -> None:
 def test_handle_manager_rejects_duplicate_device_ids() -> None:
     HandleManager.clear()
     devices = [
-        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.10"),
-        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.11"),
+        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.10", variant="mk3a"),
+        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.11", variant="mk3a"),
     ]
 
     with pytest.raises(TCSetupError, match="Duplicate device id discovered: sc-aware-10"):
@@ -138,7 +138,11 @@ def test_htb_tree_does_not_add_node_for_device_without_handle() -> None:
     HandleManager.clear()
     tree = HTBTree("wlan0")
     initial_commands = tree.pending_commands()
-    unknown_device = DiscoveredDevice(device_id="sc-aware-missing", ip_address="192.0.2.200")
+    unknown_device = DiscoveredDevice(
+        device_id="sc-aware-missing",
+        ip_address="192.0.2.200",
+        variant="mk3a",
+    )
 
     tree.add_node(unknown_device, allocate_qdisc(None))
 

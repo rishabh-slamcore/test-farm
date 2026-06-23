@@ -11,6 +11,7 @@ from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
 
 from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
 from test_farm.disruptor.models import (
+    DEVICE_VARIANTS,
     DiscoveredDevice,
     ResolverWarning,
     TCDevicePlan,
@@ -224,6 +225,10 @@ def _discovered_device_from_service(
     if txt.get("vendor") != "slamcore" or txt.get("product") != "aware":
         return None
 
+    variant = txt.get("variant")
+    if variant not in DEVICE_VARIANTS:
+        return None
+
     addresses = _decode_addresses(info.addresses)
     if not addresses:
         return None
@@ -232,7 +237,7 @@ def _discovered_device_from_service(
     if not device_id:
         return None
 
-    return DiscoveredDevice(device_id=device_id, ip_address=addresses[0])
+    return DiscoveredDevice(device_id=device_id, ip_address=addresses[0], variant=variant)
 
 
 def _service_device_id(name: str) -> str:

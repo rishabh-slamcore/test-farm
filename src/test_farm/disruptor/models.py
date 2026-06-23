@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from test_farm.disruptor.device_tree import HTBTree
@@ -17,12 +17,16 @@ class TCExecutionError(Exception):
     """Raised when applying Disruptor tc commands fails."""
 
 
+DEVICE_VARIANTS: tuple[str, ...] = ("mk2", "mk3a", "mk3b", "mk3c")
+
+
 @dataclass(frozen=True)
 class DiscoveredDevice:
     """A real Slamcore Aware device discovered by the Disruptor."""
 
     device_id: str
     ip_address: str
+    variant: str
 
 
 @dataclass(frozen=True)

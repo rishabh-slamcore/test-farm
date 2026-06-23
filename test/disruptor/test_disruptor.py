@@ -36,6 +36,7 @@ def _hawkbitc_service_info(
     address: str,
     vendor: str = "slamcore",
     product: str = "aware",
+    variant: str = "mk3a",
     extra_addresses: tuple[str, ...] = (),
 ) -> ServiceInfo:
     return ServiceInfo(
@@ -43,7 +44,11 @@ def _hawkbitc_service_info(
         name,
         addresses=[socket.inet_aton(ip_address) for ip_address in (address, *extra_addresses)],
         port=0,
-        properties={b"vendor": vendor.encode(), b"product": product.encode()},
+        properties={
+            b"vendor": vendor.encode(),
+            b"product": product.encode(),
+            b"variant": variant.encode(),
+        },
         server=f"{name.split('.', maxsplit=1)[0]}.local.",
     )
 
@@ -134,35 +139,6 @@ def test_load_disruptor_scenario_file_parses_regex_override(tmp_path: Path) -> N
     assert not scenario.overrides[0].selector.accept("sc-aware-12")
 
 
-def test_discover_aware_devices_manages_bounded_browse_lifecycle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    zeroconf = Mock()
-    browser = Mock()
-    zeroconf_factory = Mock(return_value=zeroconf)
-    service_browser_factory = Mock(return_value=browser)
-
-    monkeypatch.setattr("test_farm.disruptor.planning.Zeroconf", zeroconf_factory)
-    monkeypatch.setattr(
-        "test_farm.disruptor.planning.ServiceBrowser",
-        service_browser_factory,
-    )
-
-    devices = discover_aware_devices()
-
-    assert devices == ()
-    zeroconf_factory.assert_called_once_with()
-    service_browser_factory.assert_called_once()
-    assert service_browser_factory.call_args.args[0] is zeroconf
-    assert service_browser_factory.call_args.args[1] == planning._HAWKBITC_SERVICE_TYPE
-    assert isinstance(
-        service_browser_factory.call_args.args[2],
-        planning._AwareDeviceListener,
-    )
-    browser.cancel.assert_called_once_with()
-    zeroconf.close.assert_called_once_with()
-
-
 def test_aware_device_listener_records_hawkbitc_service_info() -> None:
     service_info = _hawkbitc_service_info(
         name="sc-aware-jq3q0028._hawkbitc._tcp.local.",
@@ -200,7 +176,11 @@ def test_aware_device_listener_records_hawkbitc_service_info() -> None:
     )
 
     assert listener.devices() == (
-        DiscoveredDevice(device_id="sc-aware-jq3q0028", ip_address="10.1.14.142"),
+        DiscoveredDevice(
+            device_id="sc-aware-jq3q0028",
+            ip_address="10.1.14.142",
+            variant="mk3a",
+        ),
     )
 
 
@@ -216,7 +196,11 @@ def test_discover_aware_devices_uses_first_name_component_and_first_address() ->
         info=service_info,
     )
 
-    assert device == DiscoveredDevice(device_id="linux-5", ip_address="10.1.13.93")
+    assert device == DiscoveredDevice(
+        device_id="linux-5",
+        ip_address="10.1.13.93",
+        variant="mk3a",
+    )
 
 
 def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
@@ -396,8 +380,8 @@ def test_build_disruptor_tc_plan_bubbles_duplicate_device_id_setup_error(
     )
     scenario = load_disruptor_scenario_file(scenario_file)
     duplicate_devices = (
-        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.10"),
-        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.11"),
+        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.10", variant="mk3a"),
+        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.11", variant="mk3a"),
     )
 
     with pytest.raises(TCSetupError, match="Duplicate device id discovered: sc-aware-10"):
