@@ -1,9 +1,13 @@
 """Disruptor scenario parsing and tc planning."""
 
 import shlex
+import socket
 import subprocess
+import time
 from threading import Event
 from typing import Protocol
+
+from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
 
 from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
 from test_farm.disruptor.models import (
@@ -23,6 +27,9 @@ from test_farm.network_impairment import (
     validate_burst,
 )
 from test_farm.scenario import DisruptorScenario, Selector
+
+_HAWKBITC_SERVICE_TYPE = "_hawkbitc._tcp.local."
+_AWARE_DISCOVERY_WINDOW_SECONDS = 6.0
 
 
 class TCExecutor(Protocol):
@@ -162,10 +169,94 @@ def apply_disruptor_tc_plan(
 def discover_aware_devices() -> tuple[DiscoveredDevice, ...]:
     """Discover Slamcore Aware devices visible to the Disruptor.
 
-    :returns: Discovered devices. Real mDNS discovery is outside this dry-run slice.
+    :returns: Discovered devices found during one bounded mDNS browse.
     """
 
-    return ()
+    listener = _AwareDeviceListener()
+    zeroconf = Zeroconf()
+    browser = ServiceBrowser(zeroconf, _HAWKBITC_SERVICE_TYPE, listener)
+    try:
+        time.sleep(_AWARE_DISCOVERY_WINDOW_SECONDS)
+        return listener.devices()
+    finally:
+        browser.cancel()
+        zeroconf.close()
+
+
+class _AwareDeviceListener(ServiceListener):
+    """Collect Slamcore Aware hawkBit client services reported by Zeroconf."""
+
+    def __init__(self) -> None:
+        self._devices: dict[str, DiscoveredDevice] = {}
+
+    def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        self._record_service(zc, type_, name)
+
+    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        self._record_service(zc, type_, name)
+
+    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        device_id = _service_device_id(name)
+        if device_id:
+            self._devices.pop(device_id, None)
+
+    def devices(self) -> tuple[DiscoveredDevice, ...]:
+        return tuple(sorted(self._devices.values(), key=lambda device: device.device_id))
+
+    def _record_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        info = zc.get_service_info(type_, name)
+        device = _discovered_device_from_service(name=name, info=info)
+        if device is None:
+            return
+
+        self._devices[device.device_id] = device
+
+
+def _discovered_device_from_service(
+    *,
+    name: str,
+    info: ServiceInfo | None,
+) -> DiscoveredDevice | None:
+    if info is None:
+        return None
+
+    txt = _decode_txt_properties(info.properties)
+    if txt.get("vendor") != "slamcore" or txt.get("product") != "aware":
+        return None
+
+    addresses = _decode_addresses(info.addresses)
+    if not addresses:
+        return None
+
+    device_id = _service_device_id(name)
+    if not device_id:
+        return None
+
+    return DiscoveredDevice(device_id=device_id, ip_address=addresses[0])
+
+
+def _service_device_id(name: str) -> str:
+    return name.split(".", maxsplit=1)[0]
+
+
+def _decode_txt_properties(properties: dict[bytes, bytes | None]) -> dict[str, str]:
+    decoded: dict[str, str] = {}
+    for key, value in properties.items():
+        if value is None:
+            continue
+        decoded[key.decode(errors="ignore")] = value.decode(errors="ignore")
+    return decoded
+
+
+def _decode_addresses(addresses: list[bytes]) -> list[str]:
+    decoded: list[str] = []
+    for address in addresses:
+        try:
+            family = socket.AF_INET6 if len(address) == 16 else socket.AF_INET
+            decoded.append(socket.inet_ntop(family, address))
+        except ValueError:
+            continue
+    return decoded
 
 
 def _does_device_match_selector(device: DiscoveredDevice, selector: Selector) -> bool:

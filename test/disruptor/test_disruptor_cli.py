@@ -140,8 +140,7 @@ def test_disruptor_non_dry_run_applies_plan_for_explicit_interface(
 
     assert result.exit_code == 0
     assert applied_interfaces == ["wlan0"]
-    assert result.stdout == ""
-    assert result.stderr == ""
+    assert "Disruptor starting network impairment" in result.stderr
 
 
 def test_disruptor_non_dry_run_reports_tc_capability_error(

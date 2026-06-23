@@ -1,18 +1,23 @@
 """Disruptor scenario and planning tests."""
 
 import asyncio
+import socket
 from collections.abc import Callable
 from pathlib import Path
 from subprocess import CompletedProcess
 from threading import Event
+from unittest.mock import Mock
 
 import pytest
+from zeroconf import ServiceInfo
 
+from test_farm.disruptor import planning
 from test_farm.disruptor.models import DiscoveredDevice, TCExecutionError, TCSetupError
 from test_farm.disruptor.planning import (
     SubprocessExecutor,
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
+    discover_aware_devices,
     render_disruptor_dry_run,
     resolve_policy_name,
 )
@@ -23,6 +28,24 @@ from test_farm.scenario import (
     ScenarioFileError,
     load_disruptor_scenario_file,
 )
+
+
+def _hawkbitc_service_info(
+    *,
+    name: str,
+    address: str,
+    vendor: str = "slamcore",
+    product: str = "aware",
+    extra_addresses: tuple[str, ...] = (),
+) -> ServiceInfo:
+    return ServiceInfo(
+        "_hawkbitc._tcp.local.",
+        name,
+        addresses=[socket.inet_aton(ip_address) for ip_address in (address, *extra_addresses)],
+        port=0,
+        properties={b"vendor": vendor.encode(), b"product": product.encode()},
+        server=f"{name.split('.', maxsplit=1)[0]}.local.",
+    )
 
 
 def test_disruptor_scenario_file_error_is_a_scenario_file_error() -> None:
@@ -109,6 +132,106 @@ def test_load_disruptor_scenario_file_parses_regex_override(tmp_path: Path) -> N
     assert scenario.overrides[0].selector.pattern == "^sc-aware-1[01]$"
     assert scenario.overrides[0].selector.accept("sc-aware-10")
     assert not scenario.overrides[0].selector.accept("sc-aware-12")
+
+
+def test_discover_aware_devices_manages_bounded_browse_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zeroconf = Mock()
+    browser = Mock()
+    zeroconf_factory = Mock(return_value=zeroconf)
+    service_browser_factory = Mock(return_value=browser)
+
+    monkeypatch.setattr("test_farm.disruptor.planning.Zeroconf", zeroconf_factory)
+    monkeypatch.setattr(
+        "test_farm.disruptor.planning.ServiceBrowser",
+        service_browser_factory,
+    )
+
+    devices = discover_aware_devices()
+
+    assert devices == ()
+    zeroconf_factory.assert_called_once_with()
+    service_browser_factory.assert_called_once()
+    assert service_browser_factory.call_args.args[0] is zeroconf
+    assert service_browser_factory.call_args.args[1] == planning._HAWKBITC_SERVICE_TYPE
+    assert isinstance(
+        service_browser_factory.call_args.args[2],
+        planning._AwareDeviceListener,
+    )
+    browser.cancel.assert_called_once_with()
+    zeroconf.close.assert_called_once_with()
+
+
+def test_aware_device_listener_records_hawkbitc_service_info() -> None:
+    service_info = _hawkbitc_service_info(
+        name="sc-aware-jq3q0028._hawkbitc._tcp.local.",
+        address="10.1.14.142",
+    )
+    unrelated_service_info = _hawkbitc_service_info(
+        name="printer._hawkbitc._tcp.local.",
+        address="10.1.14.200",
+        vendor="elsewhere",
+    )
+
+    class FakeZeroconf:
+        def __init__(self) -> None:
+            self.service_infos = {
+                service_info.name: service_info,
+                unrelated_service_info.name: unrelated_service_info,
+            }
+
+        def get_service_info(self, type_: str, name: str) -> ServiceInfo | None:
+            del type_
+            return self.service_infos.get(name)
+
+    listener = planning._AwareDeviceListener()
+    zc = FakeZeroconf()
+
+    listener.add_service(
+        zc,  # type:ignore[arg-type]
+        planning._HAWKBITC_SERVICE_TYPE,
+        service_info.name,
+    )
+    listener.add_service(
+        zc,  # type:ignore[arg-type]
+        planning._HAWKBITC_SERVICE_TYPE,
+        unrelated_service_info.name,
+    )
+
+    assert listener.devices() == (
+        DiscoveredDevice(device_id="sc-aware-jq3q0028", ip_address="10.1.14.142"),
+    )
+
+
+def test_discover_aware_devices_uses_first_name_component_and_first_address() -> None:
+    service_info = _hawkbitc_service_info(
+        name="linux-5._hawkbitc._tcp.local.",
+        address="10.1.13.93",
+        extra_addresses=("10.1.13.94",),
+    )
+
+    device = planning._discovered_device_from_service(
+        name="linux-5._hawkbitc._tcp.local.",
+        info=service_info,
+    )
+
+    assert device == DiscoveredDevice(device_id="linux-5", ip_address="10.1.13.93")
+
+
+def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
+    service_info = _hawkbitc_service_info(
+        name="other._hawkbitc._tcp.local.",
+        address="10.1.13.93",
+        product="not-aware",
+    )
+
+    device = planning._discovered_device_from_service(
+        name="other._hawkbitc._tcp.local.",
+        info=service_info,
+    )
+
+    assert device is None
 
 
 @pytest.mark.parametrize(
