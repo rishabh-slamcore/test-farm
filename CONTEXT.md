@@ -48,6 +48,10 @@ _Avoid_: selectors list, IP match, glob match
 A Disruptor override selector declared as `regex_match`, containing one regular expression matched against discovered Slamcore Aware device names.
 _Avoid_: selectors list, wildcard, substring filter
 
+**Variant Match**:
+A Disruptor override selector declared as `variant_match`, containing one exact discovered Slamcore Aware device variant.
+_Avoid_: device name match, regex match, product match
+
 **Receipt**:
 A client-posted outcome observation delivered to the Controller over the Receipt Channel.
 For a successful download it includes a reported bundle; the Controller then derives the final client outcome.
@@ -127,9 +131,10 @@ _Avoid_: Manifest file, fixture, artifact path, generated bundle
 - A **Disruptor Scenario File** applies its default impairment policy to every discovered Slamcore Aware device.
 - A **Disruptor Scenario File** evaluates device-specific overrides in order, and the first matching override determines that device's impairment policy.
 - A device-specific override in a **Disruptor Scenario File** may omit `name`; unnamed overrides receive generated names like `override-0` based on their ordered position.
-- A device-specific override in a **Disruptor Scenario File** must declare exactly one selector mode: `device_match` for exact device-name matching or `regex_match` for regular-expression matching.
+- A device-specific override in a **Disruptor Scenario File** must declare exactly one selector mode: `device_match` for exact device-name matching, `regex_match` for regular-expression matching, or `variant_match` for exact variant matching.
 - `device_match` in a **Disruptor Scenario File** contains one or more discovered device names and replaces the previous generic `selectors` list field.
 - `regex_match` in a **Disruptor Scenario File** contains one regular expression matched against incoming discovered device names.
+- `variant_match` in a **Disruptor Scenario File** contains one discovered device variant matched against incoming discovered device metadata.
 - A device-specific override in a **Disruptor Scenario File** replaces the default impairment policy rather than merging with it.
 - A **Disruptor Scenario File** can set an impairment policy to `none` to intentionally leave matched devices unimpaired.
 - A device-specific override in a **Disruptor Scenario File** can be active only during scheduled time windows.

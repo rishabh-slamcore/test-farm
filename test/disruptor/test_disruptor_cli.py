@@ -8,7 +8,8 @@ from typer.testing import CliRunner
 
 from test_farm.cli import app as farm_app
 from test_farm.disruptor.cli import app
-from test_farm.disruptor.models import DiscoveredDevice, TCExecutionError
+from test_farm.disruptor.models import TCExecutionError
+from test_farm.models import DiscoveredDevice
 
 
 def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(

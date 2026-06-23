@@ -10,14 +10,8 @@ from typing import Protocol
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
 
 from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
-from test_farm.disruptor.models import (
-    DEVICE_VARIANTS,
-    DiscoveredDevice,
-    ResolverWarning,
-    TCDevicePlan,
-    TCExecutionError,
-    TCPlan,
-)
+from test_farm.disruptor.models import ResolverWarning, TCDevicePlan, TCExecutionError, TCPlan
+from test_farm.models import DEVICE_VARIANTS, DiscoveredDevice
 from test_farm.network_impairment import (
     NetworkImpairment,
     _format_bandwidth_limit,
@@ -265,7 +259,7 @@ def _decode_addresses(addresses: list[bytes]) -> list[str]:
 
 
 def _does_device_match_selector(device: DiscoveredDevice, selector: Selector) -> bool:
-    return selector.accept(device.device_id)
+    return selector.accept(device)
 
 
 def resolve_policy_name(device: DiscoveredDevice, scenario: DisruptorScenario) -> str:
@@ -293,11 +287,9 @@ def _resolve_warnings(
     devices: tuple[DiscoveredDevice, ...],
 ) -> tuple[ResolverWarning, ...]:
     warnings: list[ResolverWarning] = []
-    discovered_device_ids = set(device.device_id for device in devices)
     for override in scenario.overrides:
-        if (
-            override.selector.unmatched_devices(discovered_device_names=discovered_device_ids)
-            == discovered_device_ids
+        if not any(
+            _does_device_match_selector(device, override.selector) for device in devices
         ):
             warnings.append(
                 ResolverWarning(policy_name=override.name, selector=override.selector)

@@ -4,10 +4,11 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, Sequence, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from test_farm.models import DiscoveredDevice
 from test_farm.network_impairment import NetworkImpairment
 
 
@@ -59,12 +60,8 @@ class DisruptorScenario:
 class Selector(Protocol):
     """A device selector in a Disruptor policy override."""
 
-    def accept(self, device_name: str) -> bool:
+    def accept(self, device: DiscoveredDevice) -> bool:
         """Return true if device_name matches selector."""
-        ...
-
-    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
-        """Return discovered device names that this selector does not match."""
         ...
 
 
@@ -74,11 +71,8 @@ class DeviceNameMatch:
 
     device_names: set[str]
 
-    def accept(self, device_name: str) -> bool:
-        return device_name in self.device_names
-
-    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
-        return discovered_device_names - self.device_names
+    def accept(self, device: DiscoveredDevice) -> bool:
+        return device.device_id in self.device_names
 
 
 @dataclass(frozen=True)
@@ -87,15 +81,18 @@ class RegexMatch:
 
     pattern: str
 
-    def accept(self, device_name: str) -> bool:
-        return re.search(self.pattern, device_name) is not None
+    def accept(self, device: DiscoveredDevice) -> bool:
+        return re.search(self.pattern, device.device_id) is not None
 
-    def unmatched_devices(self, discovered_device_names: set[str]) -> set[str]:
-        return set(
-            device_name
-            for device_name in discovered_device_names
-            if not self.accept(device_name)
-        )
+
+@dataclass(frozen=True)
+class VariantMatch:
+    """Match devices by exact discovered device variant."""
+
+    variant: str
+
+    def accept(self, device: DiscoveredDevice) -> bool:
+        return self.variant == device.variant
 
 
 @dataclass(frozen=True)
@@ -247,12 +244,14 @@ def _parse_disruptor_policy_override(
             f"{field_path}.name",
             f"{field_path}.device_match",
             f"{field_path}.regex_match",
+            f"{field_path}.variant_match",
             f"{field_path}.impairment",
         },
         optional_fields={
             f"{field_path}.name",
             f"{field_path}.device_match",
             f"{field_path}.regex_match",
+            f"{field_path}.variant_match",
         },
     )
 
@@ -276,14 +275,14 @@ def _parse_disruptor_selector(
     raw_override: dict[str, Any],
     field_path: str,
 ) -> Selector:
-    accepted_selector_types = ("device_match", "regex_match")
+    accepted_selector_types = ("device_match", "regex_match", "variant_match")
     selector_type_count = sum(
         selector_type in raw_override for selector_type in accepted_selector_types
     )
     if selector_type_count != 1:
         raise DisruptorScenarioFileError(
             f"Disruptor Scenario must set exactly one of "
-            f"{field_path}.device_match or {field_path}.regex_match."
+            f"{field_path}.device_match, {field_path}.regex_match, or {field_path}.variant_match"
         )
 
     if "device_match" in raw_override:
@@ -292,9 +291,14 @@ def _parse_disruptor_selector(
             f"{field_path}.device_match",
         )
 
-    return _parse_regex_selector(
-        raw_override["regex_match"],
-        f"{field_path}.regex_match",
+    if "regex_match" in raw_override:
+        return _parse_regex_selector(
+            raw_override["regex_match"],
+            f"{field_path}.regex_match",
+        )
+
+    return _parse_variant_selector(
+        raw_override["variant_match"], f"{field_path}.variant_match"
     )
 
 
@@ -336,6 +340,18 @@ def _parse_regex_selector(
         ) from error
 
     return RegexMatch(raw_selector)
+
+
+def _parse_variant_selector(
+    raw_selector: Any,
+    field_path: str,
+) -> VariantMatch:
+    if not isinstance(raw_selector, str) or raw_selector == "":
+        raise DisruptorScenarioFileError(
+            f"Disruptor Scenario must set {field_path} to a non-empty string."
+        )
+
+    return VariantMatch(variant=raw_selector)
 
 
 def _parse_disruptor_impairment_policy(

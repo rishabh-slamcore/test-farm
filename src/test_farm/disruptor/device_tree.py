@@ -1,7 +1,8 @@
 import logging
 from typing import ClassVar, Iterator, Protocol, Sequence, Tuple
 
-from test_farm.disruptor.models import DiscoveredDevice, TCSetupError
+from test_farm.disruptor.models import TCSetupError
+from test_farm.models import DiscoveredDevice
 from test_farm.network_impairment import (
     NetworkImpairment,
     _format_bandwidth_limit,

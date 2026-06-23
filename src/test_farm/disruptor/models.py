@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from test_farm.disruptor.device_tree import HTBTree
 
-from test_farm import scenario
+from test_farm.models import DiscoveredDevice
 from test_farm.network_impairment import NetworkImpairment
 from test_farm.scenario import DisruptorScenario, Selector
 
@@ -15,18 +15,6 @@ class TCSetupError(Exception):
 
 class TCExecutionError(Exception):
     """Raised when applying Disruptor tc commands fails."""
-
-
-DEVICE_VARIANTS: tuple[str, ...] = ("mk2", "mk3a", "mk3b", "mk3c")
-
-
-@dataclass(frozen=True)
-class DiscoveredDevice:
-    """A real Slamcore Aware device discovered by the Disruptor."""
-
-    device_id: str
-    ip_address: str
-    variant: str
 
 
 @dataclass(frozen=True)

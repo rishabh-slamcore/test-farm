@@ -13,7 +13,8 @@ from test_farm.disruptor.device_tree import (
     TBFNetemDuoQdisc,
     allocate_qdisc,
 )
-from test_farm.disruptor.models import DiscoveredDevice, TCSetupError
+from test_farm.disruptor.models import TCSetupError
+from test_farm.models import DiscoveredDevice
 from test_farm.network_impairment import NetworkImpairment
 
 

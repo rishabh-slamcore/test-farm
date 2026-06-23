@@ -3,6 +3,7 @@
 import asyncio
 import socket
 from collections.abc import Callable
+from ipaddress import ip_address
 from pathlib import Path
 from subprocess import CompletedProcess
 from threading import Event
@@ -12,7 +13,7 @@ import pytest
 from zeroconf import ServiceInfo
 
 from test_farm.disruptor import planning
-from test_farm.disruptor.models import DiscoveredDevice, TCExecutionError, TCSetupError
+from test_farm.disruptor.models import TCExecutionError, TCSetupError
 from test_farm.disruptor.planning import (
     SubprocessExecutor,
     apply_disruptor_tc_plan,
@@ -21,11 +22,13 @@ from test_farm.disruptor.planning import (
     render_disruptor_dry_run,
     resolve_policy_name,
 )
+from test_farm.models import DiscoveredDevice
 from test_farm.scenario import (
     DeviceNameMatch,
     DisruptorScenarioFileError,
     RegexMatch,
     ScenarioFileError,
+    VariantMatch,
     load_disruptor_scenario_file,
 )
 
@@ -135,8 +138,40 @@ def test_load_disruptor_scenario_file_parses_regex_override(tmp_path: Path) -> N
 
     assert isinstance(scenario.overrides[0].selector, RegexMatch)
     assert scenario.overrides[0].selector.pattern == "^sc-aware-1[01]$"
-    assert scenario.overrides[0].selector.accept("sc-aware-10")
-    assert not scenario.overrides[0].selector.accept("sc-aware-12")
+    assert scenario.overrides[0].selector.accept(
+        DiscoveredDevice("sc-aware-10", ip_address="127.0.0.1", variant="mk3a")
+    )
+    assert not scenario.overrides[0].selector.accept(
+        DiscoveredDevice("sc-aware-12", ip_address="127.0.0.1", variant="mk3a")
+    )
+
+
+def test_load_disruptor_scenario_file_parses_variant_override(tmp_path: Path) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        (
+            "network_impairment:\n"
+            "  default:\n"
+            "    delay: 100ms\n"
+            "  overrides:\n"
+            "    - name: mk3b-devices\n"
+            "      variant_match: mk3b\n"
+            "      impairment:\n"
+            "        loss: 25%\n"
+        ),
+        encoding="utf-8",
+    )
+
+    scenario = load_disruptor_scenario_file(scenario_file)
+
+    assert isinstance(scenario.overrides[0].selector, VariantMatch)
+    assert scenario.overrides[0].selector.variant == "mk3b"
+    assert scenario.overrides[0].selector.accept(
+        DiscoveredDevice("sc-aware-10", ip_address="127.0.0.1", variant="mk3b")
+    )
+    assert not scenario.overrides[0].selector.accept(
+        DiscoveredDevice("sc-aware-12", ip_address="127.0.0.1", variant="mk3a")
+    )
 
 
 def test_aware_device_listener_records_hawkbitc_service_info() -> None:
@@ -233,8 +268,9 @@ def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
         (
             ("      impairment:\n" "        loss: 25%\n"),
             (
-                "must set exactly one of network_impairment.overrides\\[0\\].device_match "
-                "or network_impairment.overrides\\[0\\].regex_match"
+                "must set exactly one of network_impairment.overrides\\[0\\].device_match, "
+                "network_impairment.overrides\\[0\\].regex_match, "
+                "or network_impairment.overrides\\[0\\].variant_match"
             ),
         ),
         (
@@ -242,12 +278,14 @@ def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
                 "      device_match:\n"
                 "        - sc-aware-10\n"
                 "      regex_match: '^sc-aware-1[01]$'\n"
+                "      variant_match: mk3b\n"
                 "      impairment:\n"
                 "        loss: 25%\n"
             ),
             (
-                "must set exactly one of network_impairment.overrides\\[0\\].device_match "
-                "or network_impairment.overrides\\[0\\].regex_match"
+                "must set exactly one of network_impairment.overrides\\[0\\].device_match, "
+                "network_impairment.overrides\\[0\\].regex_match, "
+                "or network_impairment.overrides\\[0\\].variant_match"
             ),
         ),
         (
@@ -269,6 +307,10 @@ def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
         (
             ("      regex_match: '['\n" "      impairment:\n" "        loss: 25%\n"),
             "must set network_impairment.overrides\\[0\\].regex_match to a valid regular expression",
+        ),
+        (
+            ("      variant_match: ''\n" "      impairment:\n" "        loss: 25%\n"),
+            "must set network_impairment.overrides\\[0\\].variant_match to a non-empty string",
         ),
     ],
 )
@@ -467,6 +509,55 @@ def test_disruptor_tc_plan_uses_regex_override(
     node = next(iter(plan.routing_tree))
     assert node.qdisc.impairment is not None
     assert node.qdisc.impairment.loss == 25.0
+    assert plan.warnings == ()
+
+
+def test_disruptor_tc_plan_uses_variant_override(tmp_path: Path) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        (
+            "network_impairment:\n"
+            "  default:\n"
+            "    delay: 100ms\n"
+            "  overrides:\n"
+            "    - name: mk3b-devices\n"
+            "      variant_match: mk3b\n"
+            "      impairment:\n"
+            "        loss: 25%\n"
+        ),
+        encoding="utf-8",
+    )
+    scenario = load_disruptor_scenario_file(scenario_file)
+    devices = (
+        DiscoveredDevice(device_id="sc-aware-10", ip_address="192.0.2.10", variant="mk3a"),
+        DiscoveredDevice(device_id="sc-aware-11", ip_address="192.0.2.11", variant="mk3b"),
+        DiscoveredDevice(device_id="sc-aware-12", ip_address="192.0.2.12", variant="mk3b"),
+    )
+
+    plan = build_disruptor_tc_plan(
+        interface_name="wlan0",
+        devices=devices,
+        scenario=scenario,
+    )
+
+    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
+        "default",
+        "mk3b-devices",
+        "mk3b-devices",
+    ]
+    matched_nodes = [
+        node
+        for node in plan.routing_tree
+        if resolve_policy_name(node.device, plan.scenario) == "mk3b-devices"
+    ]
+    assert [
+        node.qdisc.impairment.loss
+        for node in matched_nodes
+        if node.qdisc.impairment is not None
+    ] == [
+        25.0,
+        25.0,
+    ]
     assert plan.warnings == ()
 
 
@@ -689,6 +780,38 @@ def test_disruptor_tc_plan_warns_for_unmatched_regex_selector(
         "default"
     ]
     assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-batch",)]
+
+
+def test_disruptor_tc_plan_warns_for_unmatched_variant_selector(
+    tmp_path: Path,
+    discovered_devices: Callable[[int], list[DiscoveredDevice]],
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        (
+            "network_impairment:\n"
+            "  default:\n"
+            "    delay: 100ms\n"
+            "  overrides:\n"
+            "    - name: missing-variant\n"
+            "      variant_match: mk3b\n"
+            "      impairment:\n"
+            "        loss: 25%\n"
+        ),
+        encoding="utf-8",
+    )
+    scenario = load_disruptor_scenario_file(scenario_file)
+
+    plan = build_disruptor_tc_plan(
+        interface_name="wlan0",
+        devices=tuple(discovered_devices(1)),
+        scenario=scenario,
+    )
+
+    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
+        "default"
+    ]
+    assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-variant",)]
 
 
 class RecordingTCExecutor:
