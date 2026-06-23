@@ -60,6 +60,35 @@ def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
     assert result.stderr == ""
 
 
+def test_disruptor_dry_run_applies_default_impairment_when_no_devices_are_discovered(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("test_farm.disruptor.cli.discover_aware_devices", lambda: ())
+    monkeypatch.setattr(
+        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(
+        app,
+        [str(scenario_file), "--interface", "wlan0", "--dry-run"],
+    )
+
+    assert result.exit_code == 0
+    assert "Disruptor dry-run plan for interface wlan0" in result.stdout
+    assert "default policy applied" in result.stdout
+    assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem delay 100ms" in result.stdout
+    assert "tc filter add" not in result.stdout
+    assert result.stderr == ""
+
+
 def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -105,7 +105,11 @@ def build_disruptor_tc_plan(
     for device in devices:
         impairment = _resolve_impairment(device, scenario)
         qdisc = allocate_qdisc(impairment)
-        root_tc_tree.add_node(device=device, qdisc=qdisc)
+        root_tc_tree.add_node(qdisc=qdisc, device=device)
+
+    if not devices:
+        qdisc = allocate_qdisc(scenario.default_impairment)
+        root_tc_tree.add_default(qdisc=qdisc)
 
     return TCPlan(
         interface_name=interface_name,
@@ -124,9 +128,12 @@ def render_disruptor_dry_run(plan: TCPlan) -> str:
 
     lines = [f"Disruptor dry-run plan for interface {plan.interface_name}"]
     for node in plan.routing_tree:
-        lines.append(
-            f"{node.device.device_id} {node.device.ip_address} -> {resolve_policy_name(node.device, plan.scenario)}"
-        )
+        if node.device:
+            lines.append(
+                f"{node.device.device_id} {node.device.ip_address} -> {resolve_policy_name(node.device, plan.scenario)}"
+            )
+        else:
+            lines.append("default policy applied")
     for warning in plan.warnings:
         lines.append(
             f"warning: selector in policy "

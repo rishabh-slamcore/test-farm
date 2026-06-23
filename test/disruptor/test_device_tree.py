@@ -7,6 +7,7 @@ from pytest import MonkeyPatch
 
 from test_farm.disruptor.device_tree import (
     HandleManager,
+    HTBClass,
     HTBTree,
     NetemQdisc,
     PFiFoQdisc,
@@ -70,16 +71,19 @@ def test_bandwidth_and_netem_impairment_renders_tbf_then_child_netem(
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
     monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
-    device = discovered_devices(1)[0]
+    devices = discovered_devices(2)
     impairment = NetworkImpairment(delay=0.1, loss=5.0, bandwidth_limit=1_000_000)
     qdisc = allocate_qdisc(impairment)
 
     assert isinstance(qdisc, TBFNetemDuoQdisc)
-    assert qdisc.command("wlan0", "1:10", device.device_id) == (
-        "tc qdisc add dev wlan0 parent 1:10 handle 10: "
-        "tbf rate 1mbit burst 6000 latency 50ms",
-        "tc qdisc add dev wlan0 parent 10: handle 10:1 netem delay 100ms loss 5%",
-    )
+    for index, device in enumerate(devices, start=1):
+        class_minor = index * 10
+        assert qdisc.command("wlan0", f"1:{class_minor}", f"{class_minor}:") == (
+            f"tc qdisc add dev wlan0 parent 1:{class_minor} handle {class_minor}: "
+            "tbf rate 1mbit burst 6000 latency 50ms",
+            f"tc qdisc add dev wlan0 parent {class_minor}: "
+            f"handle {class_minor}:1 netem delay 100ms loss 5%",
+        )
 
 
 def test_htb_tree_adds_per_device_class_qdisc_and_filter(
@@ -92,8 +96,8 @@ def test_htb_tree_adds_per_device_class_qdisc_and_filter(
 
     for device in devices:
         tree.add_node(
-            device,
-            allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)),
+            qdisc=allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)),
+            device=device,
         )
 
     per_device_commands = tree.pending_commands()[4:]
@@ -119,6 +123,53 @@ def test_htb_tree_adds_per_device_class_qdisc_and_filter(
         )
 
 
+def test_htb_tree_adds_default_impairment_node_without_device() -> None:
+    HandleManager.clear()
+    tree = HTBTree("wlan0")
+
+    tree.add_default(qdisc=allocate_qdisc(NetworkImpairment(delay=0.1)))
+
+    nodes = list(tree)
+    commands = tree.pending_commands()
+    assert len(nodes) == 1
+    assert nodes[0].device is None
+    assert nodes[0].qdisc.impairment == NetworkImpairment(delay=0.1)
+    assert "tc class add dev wlan0 parent 1:1 classid 1:10 htb rate 1000mbit" in commands
+    assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem delay 100ms" in commands
+    assert not any(command.startswith("tc filter add") for command in commands)
+
+
+def test_htb_tree_rejects_adding_default_impairment_twice() -> None:
+    HandleManager.clear()
+    tree = HTBTree("wlan0")
+    tree.add_default(qdisc=allocate_qdisc(NetworkImpairment(delay=0.1)))
+    pending_commands = tree.pending_commands()
+
+    with pytest.raises(TCSetupError, match="Default impairment already setup"):
+        tree.add_default(qdisc=allocate_qdisc(NetworkImpairment(delay=0.2)))
+
+    assert tree.pending_commands() == pending_commands
+
+
+def test_htb_tree_default_impairment_renders_bandwidth_then_child_netem(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    HandleManager.clear()
+    tree = HTBTree("wlan0")
+
+    tree.add_default(
+        qdisc=allocate_qdisc(NetworkImpairment(delay=0.1, loss=5.0, bandwidth_limit=1_000_000))
+    )
+
+    assert tree.pending_commands()[-3:] == (
+        "tc class add dev wlan0 parent 1:1 classid 1:10 htb rate 1000mbit",
+        "tc qdisc add dev wlan0 parent 1:10 handle 10: "
+        "tbf rate 1mbit burst 6000 latency 50ms",
+        "tc qdisc add dev wlan0 parent 10: handle 10:1 netem delay 100ms loss 5%",
+    )
+
+
 def test_htb_tree_rejects_adding_the_same_device_twice(
     monkeypatch: MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
@@ -126,11 +177,15 @@ def test_htb_tree_rejects_adding_the_same_device_twice(
     monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
     device = discovered_devices(1)[0]
     tree = HTBTree("wlan0")
-    tree.add_node(device, allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)))
+    tree.add_node(
+        qdisc=allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)), device=device
+    )
     pending_commands = tree.pending_commands()
 
     with pytest.raises(TCSetupError, match="Class already exists for device sc-aware-10"):
-        tree.add_node(device, allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)))
+        tree.add_node(
+            qdisc=allocate_qdisc(NetworkImpairment(bandwidth_limit=1_000_000)), device=device
+        )
 
     assert tree.pending_commands() == pending_commands
 
@@ -145,7 +200,7 @@ def test_htb_tree_does_not_add_node_for_device_without_handle() -> None:
         variant="mk3a",
     )
 
-    tree.add_node(unknown_device, allocate_qdisc(None))
+    tree.add_node(qdisc=allocate_qdisc(None), device=unknown_device)
 
     assert list(tree) == []
     assert tree.pending_commands() == initial_commands

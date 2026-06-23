@@ -396,7 +396,11 @@ def test_default_disruptor_scenario_builds_typed_plan_for_discovered_devices(
     )
 
     assert plan.interface_name == "wlan0"
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == [
         "default",
         "default",
     ]
@@ -404,12 +408,59 @@ def test_default_disruptor_scenario_builds_typed_plan_for_discovered_devices(
         scenario.default_impairment,
         scenario.default_impairment,
     ]
-    assert [node.classid for node in plan.routing_tree] == ["1:10", "1:20"]
     commands = plan.routing_tree.pending_commands()
     assert (
         "tc filter add dev wlan0 parent 1: protocol ip prio 1 u32 match ip dst "
         "192.0.2.11/32 flowid 1:20"
     ) in commands
+
+
+def test_disruptor_tc_plan_builds_default_node_when_no_devices_are_discovered(
+    tmp_path: Path,
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    scenario = load_disruptor_scenario_file(scenario_file)
+
+    plan = build_disruptor_tc_plan(
+        interface_name="wlan0",
+        devices=(),
+        scenario=scenario,
+    )
+
+    nodes = list(plan.routing_tree)
+    commands = plan.routing_tree.pending_commands()
+    assert len(nodes) == 1
+    assert nodes[0].device is None
+    assert nodes[0].qdisc.impairment == scenario.default_impairment
+    assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem delay 100ms" in commands
+    assert not any(command.startswith("tc filter add") for command in commands)
+    assert plan.warnings == ()
+
+
+def test_render_disruptor_dry_run_reports_default_policy_without_discovered_devices(
+    tmp_path: Path,
+) -> None:
+    scenario_file = tmp_path / "disruptor.yaml"
+    scenario_file.write_text(
+        ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
+        encoding="utf-8",
+    )
+    scenario = load_disruptor_scenario_file(scenario_file)
+    plan = build_disruptor_tc_plan(
+        interface_name="wlan0",
+        devices=(),
+        scenario=scenario,
+    )
+
+    output = render_disruptor_dry_run(plan)
+
+    assert "default policy applied" in output
+    assert "tc qdisc add dev wlan0 parent 1:10 handle 10: netem delay 100ms" in output
+    assert "tc filter add" not in output
 
 
 def test_build_disruptor_tc_plan_bubbles_duplicate_device_id_setup_error(
@@ -466,9 +517,11 @@ def test_disruptor_tc_plan_uses_first_matching_override(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
-        "first-match"
-    ]
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == ["first-match"]
     node = next(iter(plan.routing_tree))
     assert node.qdisc.impairment is not None
     assert node.qdisc.impairment.delay is None
@@ -501,7 +554,11 @@ def test_disruptor_tc_plan_uses_regex_override(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == [
         "batch",
         "batch",
         "default",
@@ -540,7 +597,11 @@ def test_disruptor_tc_plan_uses_variant_override(tmp_path: Path) -> None:
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == [
         "default",
         "mk3b-devices",
         "mk3b-devices",
@@ -548,7 +609,8 @@ def test_disruptor_tc_plan_uses_variant_override(tmp_path: Path) -> None:
     matched_nodes = [
         node
         for node in plan.routing_tree
-        if resolve_policy_name(node.device, plan.scenario) == "mk3b-devices"
+        if node.device is not None
+        and resolve_policy_name(node.device, plan.scenario) == "mk3b-devices"
     ]
     assert [
         node.qdisc.impairment.loss
@@ -588,7 +650,10 @@ def test_disruptor_tc_plan_represents_none_policy_as_unimpaired(
     )
 
     node = next(iter(plan.routing_tree))
-    assert resolve_policy_name(node.device, plan.scenario) == "control"
+    assert (
+        node.device is not None
+        and resolve_policy_name(node.device, plan.scenario) == "control"
+    )
     assert node.qdisc.impairment is None
     commands = plan.routing_tree.pending_commands()
     assert "tc qdisc add dev wlan0 parent 1:10 handle 10: pfifo limit 10000" in commands
@@ -710,9 +775,11 @@ def test_disruptor_tc_plan_returns_structured_warnings_for_unresolved_selectors(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
-        "default"
-    ]
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == ["default"]
     assert [(warning.policy_name) for warning in plan.warnings] == [("missing-device")]
 
 
@@ -744,9 +811,11 @@ def test_disruptor_tc_plan_warns_only_for_device_names(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
-        "partial"
-    ]
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == ["partial"]
     assert [(warning.policy_name, warning.selector) for warning in plan.warnings] == []
 
 
@@ -776,9 +845,11 @@ def test_disruptor_tc_plan_warns_for_unmatched_regex_selector(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
-        "default"
-    ]
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == ["default"]
     assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-batch",)]
 
 
@@ -808,9 +879,11 @@ def test_disruptor_tc_plan_warns_for_unmatched_variant_selector(
         scenario=scenario,
     )
 
-    assert [resolve_policy_name(node.device, plan.scenario) for node in plan.routing_tree] == [
-        "default"
-    ]
+    assert [
+        resolve_policy_name(node.device, plan.scenario)
+        for node in plan.routing_tree
+        if node.device is not None
+    ] == ["default"]
     assert [(warning.policy_name,) for warning in plan.warnings] == [("missing-variant",)]
 
 

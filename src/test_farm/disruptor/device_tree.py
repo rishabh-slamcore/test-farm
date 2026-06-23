@@ -26,6 +26,7 @@ class HandleManager:
             if device.device_id in seen_device_ids:
                 raise TCSetupError(f"Duplicate device id discovered: {device.device_id}")
             seen_device_ids.add(device.device_id)
+            # arbritary scheme so that handles don't clash
             cls._handles[device.device_id] = index * 10
 
     @classmethod
@@ -44,18 +45,26 @@ class HandleManager:
     def clear(cls) -> None:
         cls._handles.clear()
 
+    @classmethod
+    def add_default(cls) -> None:
+        cls._handles["default"] = 10
+
+    @classmethod
+    def default_handle(cls) -> str:
+        return f"{cls.class_minor("default")}:"
+
 
 class LeafQDisc(Protocol):
     impairment: NetworkImpairment | None
 
-    def command(self, interface_name: str, parent: str, device_id: str) -> Tuple[str, ...]: ...
+    def command(self, interface_name: str, parent: str, handle: str) -> Tuple[str, ...]: ...
 
 
 class TBFQdisc:
     def __init__(self, impairment: NetworkImpairment):
         self.impairment: NetworkImpairment | None = impairment
 
-    def command(self, interface_name: str, parent: str, device_id: str) -> Tuple[str, ...]:
+    def command(self, interface_name: str, parent: str, handle: str) -> Tuple[str, ...]:
         assert self.impairment is not None
         bps = self.impairment.bandwidth_limit
         assert bps is not None
@@ -63,10 +72,6 @@ class TBFQdisc:
         burst = compute_burst(bps, mtu)
         validate_burst(burst, mtu, bps)
         latency = "50ms"  # packets waiting for more than latency will be dropped from queue
-        try:
-            handle = HandleManager.handle(device_id)
-        except KeyError:
-            raise TCSetupError(f"No handle available for {device_id}.")
         return (
             f"tc qdisc add dev {interface_name} parent {parent} handle {handle} "
             f"tbf rate {_format_bandwidth_limit(bps)} burst {burst} latency {latency}",
@@ -81,18 +86,13 @@ class NetemQdisc:
         self,
         interface_name: str,
         parent: str,
-        device_id: str,
-        handle_override: str | None = None,
+        handle: str,
     ) -> Tuple[str, ...]:
         assert self.impairment is not None
         netem_args = netem_arguments(self.impairment)
         if not netem_args:
             raise TCSetupError("Netem qdisc requires delay or loss impairment.")
         args = " ".join(netem_args)
-        try:
-            handle = handle_override if handle_override else HandleManager.handle(device_id)
-        except KeyError:
-            raise TCSetupError(f"No handle available for {device_id}.")
         return (
             f"tc qdisc add dev {interface_name} parent {parent} handle {handle} "
             f"netem {args}",
@@ -105,14 +105,13 @@ class TBFNetemDuoQdisc:
         self._tbf = TBFQdisc(self.impairment)
         self._netem = NetemQdisc(self.impairment)
 
-    def command(self, interface_name: str, parent: str, device_id: str) -> Tuple[str, ...]:
-        tbf_cmnds = self._tbf.command(interface_name, parent, device_id)
-        netem_handle = f"{HandleManager.class_minor(device_id)}:1"
+    def command(self, interface_name: str, parent: str, handle: str) -> Tuple[str, ...]:
+        tbf_cmnds = self._tbf.command(interface_name, parent, handle)
+        netem_handle = handle + "1"
         netem_cmnds = self._netem.command(
-            interface_name,
-            HandleManager.handle(device_id),
-            device_id,
-            handle_override=netem_handle,
+            interface_name=interface_name,
+            parent=handle,
+            handle=netem_handle,
         )
 
         return tbf_cmnds + netem_cmnds
@@ -122,11 +121,7 @@ class PFiFoQdisc:
     def __init__(self, _: NetworkImpairment | None = None):
         self.impairment: NetworkImpairment | None = None
 
-    def command(self, interface_name: str, parent: str, device_id: str) -> Tuple[str, ...]:
-        try:
-            handle = HandleManager.handle(device_id)
-        except KeyError:
-            raise TCSetupError(f"No handle available for {device_id}.")
+    def command(self, interface_name: str, parent: str, handle: str) -> Tuple[str, ...]:
         return (
             f"tc qdisc add dev {interface_name} parent {parent} handle {handle} "
             f"pfifo limit 10000",  # limit <number> of messages queue can hold
@@ -135,27 +130,58 @@ class PFiFoQdisc:
 
 class HTBClass:
 
-    def __init__(self, interface: str, qdisc: LeafQDisc, device: DiscoveredDevice):
+    def __init__(
+        self, interface: str, qdisc: LeafQDisc, device: DiscoveredDevice | None = None
+    ):
         self._interface = interface
         self.qdisc = qdisc
         self.device = device
-        self.classid = HandleManager.classid(device.device_id)
 
-    def initialise(self) -> Tuple[str, ...]:
+    @classmethod
+    def setup_class(cls, interface: str, classid: str) -> tuple[str, ...]:
         # htb rate which is set to high limit as HTB is not used for rate limiting
         # hardcoding per-client classes to root htb class which will always have handle as 1:1
-        cmd = (
-            f"tc class add dev {self._interface} parent 1:1 classid {self.classid} htb rate 1000mbit",
+        return (
+            f"tc class add dev {interface} parent 1:1 classid {classid} htb rate 1000mbit",
         )
-        child_cmd = self.activate_child()
-        # by adding /32 variant, we specify that all packets from root (1:) which match dst ip, should be sent to classid
-        filter = (
-            f"tc filter add dev {self._interface} parent 1: protocol ip prio 1 u32 match ip dst {self.device.ip_address}/32 flowid {self.classid}",
-        )
-        return cmd + child_cmd + filter
 
-    def activate_child(self) -> Tuple[str, ...]:
-        return self.qdisc.command(self._interface, self.classid, self.device.device_id)
+    @classmethod
+    def setup_filter(cls, interface: str, classid: str, ip_address: str) -> tuple[str, ...]:
+        # by adding /32 variant, we specify that all packets from root (1:) which match dst ip, should be sent to classid
+        return (
+            f"tc filter add dev {interface} parent 1: protocol ip prio 1 u32 match ip dst {ip_address}/32 flowid {classid}",
+        )
+
+    @classmethod
+    def get_classid(cls, device: DiscoveredDevice | None) -> str:
+        if device is None:
+            raise TCSetupError("Node incorrectly setup. No device available")
+
+        device_id = device.device_id
+
+        try:
+            return HandleManager.classid(device_id)
+        except KeyError:
+            raise TCSetupError(f"No handle available for {device_id}.")
+
+    def initialise(self) -> Tuple[str, ...]:
+        assert self.device is not None
+        classid = HTBClass.get_classid(device=self.device)
+        class_setup_cmd = HTBClass.setup_class(self._interface, classid)
+        stateless_qdisc_setup = self.activate_node(self.device.device_id)
+        filter = HTBClass.setup_filter(
+            interface=self._interface, classid=classid, ip_address=self.device.ip_address
+        )
+        return class_setup_cmd + stateless_qdisc_setup + filter
+
+    def activate_node(self, device_id: str) -> Tuple[str, ...]:
+        try:
+            handle = HandleManager.handle(device_id)
+            classid = HTBClass.get_classid(device=self.device)
+        except KeyError:
+            raise TCSetupError(f"No handle available for {device_id}.")
+
+        return self.qdisc.command(self._interface, classid, handle)
 
 
 def allocate_qdisc(impairment: NetworkImpairment | None) -> LeafQDisc:
@@ -183,6 +209,7 @@ class HTBTree:
             f"tc qdisc add dev {interface} parent 1:99 handle 99: pfifo limit 10000",
         ]
         self._nodes: dict[str, HTBClass] = {}
+        self._default_node_added = False
 
     def __iter__(self) -> Iterator[HTBClass]:
         return iter(self._nodes.values())
@@ -198,7 +225,7 @@ class HTBTree:
         self._buffer.clear()
         return commands
 
-    def add_node(self, device: DiscoveredDevice, qdisc: LeafQDisc) -> None:
+    def add_node(self, qdisc: LeafQDisc, device: DiscoveredDevice) -> None:
         try:
             class_id = HandleManager.classid(device_id=device.device_id)
         except KeyError:
@@ -208,3 +235,21 @@ class HTBTree:
             raise TCSetupError(f"Class already exists for device {device.device_id}.")
         self._nodes[class_id] = HTBClass(interface=self._interface, qdisc=qdisc, device=device)
         self._buffer.extend(self._nodes[class_id].initialise())
+
+    def add_default(self, qdisc: LeafQDisc) -> None:
+        if self._default_node_added:
+            raise TCSetupError(f"Default impairment already setup")
+        HandleManager.add_default()
+        class_id = HandleManager.classid(device_id="default")
+        node = HTBClass(interface=self._interface, qdisc=qdisc)
+        self._nodes[class_id] = node
+
+        commands = HTBClass.setup_class(
+            interface=self._interface, classid=class_id
+        ) + qdisc.command(
+            interface_name=self._interface,
+            parent=class_id,
+            handle=HandleManager.default_handle(),
+        )
+        self._buffer.extend(commands)
+        self._default_node_added = True
