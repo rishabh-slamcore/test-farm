@@ -13,12 +13,16 @@ import pytest
 from zeroconf import ServiceInfo
 
 from test_farm.disruptor import planning
+from test_farm.disruptor.discovery import (
+    _HAWKBITC_SERVICE_TYPE,
+    AwareDeviceListener,
+    discovered_device_from_service,
+)
 from test_farm.disruptor.models import TCExecutionError, TCSetupError
 from test_farm.disruptor.planning import (
     SubprocessExecutor,
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
-    discover_aware_devices,
     render_disruptor_dry_run,
     resolve_policy_name,
 )
@@ -196,17 +200,17 @@ def test_aware_device_listener_records_hawkbitc_service_info() -> None:
             del type_
             return self.service_infos.get(name)
 
-    listener = planning._AwareDeviceListener()
+    listener = AwareDeviceListener()
     zc = FakeZeroconf()
 
     listener.add_service(
         zc,  # type:ignore[arg-type]
-        planning._HAWKBITC_SERVICE_TYPE,
+        _HAWKBITC_SERVICE_TYPE,
         service_info.name,
     )
     listener.add_service(
         zc,  # type:ignore[arg-type]
-        planning._HAWKBITC_SERVICE_TYPE,
+        _HAWKBITC_SERVICE_TYPE,
         unrelated_service_info.name,
     )
 
@@ -226,7 +230,7 @@ def test_discover_aware_devices_uses_first_name_component_and_first_address() ->
         extra_addresses=("10.1.13.94",),
     )
 
-    device = planning._discovered_device_from_service(
+    device = discovered_device_from_service(
         name="linux-5._hawkbitc._tcp.local.",
         info=service_info,
     )
@@ -245,7 +249,7 @@ def test_discover_aware_devices_ignores_non_aware_hawkbitc_services() -> None:
         product="not-aware",
     )
 
-    device = planning._discovered_device_from_service(
+    device = discovered_device_from_service(
         name="other._hawkbitc._tcp.local.",
         info=service_info,
     )

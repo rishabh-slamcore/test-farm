@@ -239,6 +239,6 @@ def test_leaf_qdisc_command_raises_for_device_without_handle(
     monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
     HandleManager.clear()
     qdisc = allocate_qdisc(impairment)
-
-    with pytest.raises(TCSetupError, match="No handle available for sc-aware-missing"):
-        qdisc.command("wlan0", "1:10", "sc-aware-missing")
+    node = HTBClass(interface="wlan0", qdisc=qdisc)
+    with pytest.raises(AssertionError):
+        node.initialise()

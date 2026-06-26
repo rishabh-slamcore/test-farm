@@ -6,11 +6,11 @@ from pathlib import Path
 
 import typer
 
+from test_farm.disruptor.discovery import discover_aware_devices
 from test_farm.disruptor.models import TCExecutionError
 from test_farm.disruptor.planning import (
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
-    discover_aware_devices,
     render_disruptor_dry_run,
 )
 from test_farm.scenario import (
