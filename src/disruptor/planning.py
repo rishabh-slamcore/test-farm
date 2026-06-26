@@ -5,11 +5,15 @@ import subprocess
 from threading import Event
 from typing import Protocol
 
-from test_farm.disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
-from test_farm.disruptor.models import ResolverWarning, TCDevicePlan, TCExecutionError, TCPlan
-from test_farm.models import DEVICE_VARIANTS, DiscoveredDevice
-from test_farm.network_impairment import NetworkImpairment
-from test_farm.scenario import DisruptorScenario, Selector
+from disruptor.device_tree import HandleManager, HTBTree, allocate_qdisc
+from disruptor.models import (
+    DiscoveredDevice,
+    NetworkImpairment,
+    ResolverWarning,
+    TCExecutionError,
+    TCPlan,
+)
+from disruptor.scenario import DisruptorScenario, Selector
 
 
 class TCExecutor(Protocol):

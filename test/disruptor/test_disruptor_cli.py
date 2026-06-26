@@ -6,10 +6,8 @@ from pathlib import Path
 from pytest import MonkeyPatch
 from typer.testing import CliRunner
 
-from test_farm.cli import app as farm_app
-from test_farm.disruptor.cli import app
-from test_farm.disruptor.models import TCExecutionError
-from test_farm.models import DiscoveredDevice
+from disruptor.cli import app
+from disruptor.models import DiscoveredDevice, TCExecutionError
 
 
 def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
@@ -29,11 +27,11 @@ def test_disruptor_dry_run_resolves_discovered_devices_to_default_impairment(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.discover_aware_devices",
+        "disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(2)),
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        "disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
     )
     runner = CliRunner()
@@ -69,9 +67,9 @@ def test_disruptor_dry_run_applies_default_impairment_when_no_devices_are_discov
         ("network_impairment:\n" "  default:\n" "    delay: 100ms\n"),
         encoding="utf-8",
     )
-    monkeypatch.setattr("test_farm.disruptor.cli.discover_aware_devices", lambda: ())
+    monkeypatch.setattr("disruptor.cli.discover_aware_devices", lambda: ())
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        "disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
     )
     runner = CliRunner()
@@ -119,11 +117,11 @@ def test_disruptor_dry_run_integrates_ordered_overrides_with_fake_discovery(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.discover_aware_devices",
+        "disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(3)),
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        "disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(AssertionError(f"unexpected apply: {plan}")),
     )
     runner = CliRunner()
@@ -156,12 +154,12 @@ def test_disruptor_non_dry_run_applies_plan_for_explicit_interface(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.discover_aware_devices",
+        "disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(1)),
     )
     applied_interfaces: list[str] = []
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        "disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: applied_interfaces.append(plan.interface_name),
     )
     runner = CliRunner()
@@ -184,11 +182,11 @@ def test_disruptor_non_dry_run_reports_tc_capability_error(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.discover_aware_devices",
+        "disruptor.cli.discover_aware_devices",
         lambda: tuple(discovered_devices(1)),
     )
     monkeypatch.setattr(
-        "test_farm.disruptor.cli.apply_disruptor_tc_plan",
+        "disruptor.cli.apply_disruptor_tc_plan",
         lambda plan: (_ for _ in ()).throw(
             TCExecutionError(
                 "RTNETLINK answers: Operation not permitted\n"
@@ -226,12 +224,3 @@ def test_disruptor_throws_if_scenario_fails_to_load(tmp_path: Path) -> None:
     result = runner.invoke(app, [str(scenario_file), "--dry-run", "--interface", "skynet"])
 
     assert result.exit_code == 2
-
-
-def test_test_farm_cli_does_not_expose_disrupt_subcommand() -> None:
-    runner = CliRunner()
-
-    result = runner.invoke(farm_app, ["disrupt"])
-
-    assert result.exit_code == 2
-    assert "No such command" in result.stderr

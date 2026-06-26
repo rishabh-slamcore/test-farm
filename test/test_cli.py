@@ -329,3 +329,12 @@ def test_run_exits_with_code_2_for_unreachable_controller_bind_address(
         return
 
     assert "Controller bind address must use an IPv4 address, got localhost." in result.stderr
+
+
+def test_test_farm_cli_does_not_expose_disrupt_subcommand() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["disrupt"])
+
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr

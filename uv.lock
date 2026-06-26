@@ -607,6 +607,47 @@ wheels = [
 ]
 
 [[package]]
+name = "slamcore-disruptor"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "typer" },
+    { name = "zeroconf" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "isort" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },
+    { name = "typer", specifier = ">=0.12.3,<1.0" },
+    { name = "zeroconf", specifier = ">=0.149.17" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "black", specifier = ">=24.10.0,<26.0.0" },
+    { name = "fastapi", specifier = ">=0.115.0,<1.0.0" },
+    { name = "httpx", specifier = ">=0.28.0,<1.0.0" },
+    { name = "isort", specifier = ">=5.13.2,<6.0.0" },
+    { name = "mypy", specifier = ">=1.20.0,<2.0.0" },
+    { name = "pre-commit", specifier = ">=4.2.0,<5.0.0" },
+    { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
+    { name = "uvicorn", specifier = ">=0.32.0,<1.0.0" },
+]
+
+[[package]]
 name = "starlette"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -617,47 +658,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/c9/584bc9651441b4ba60cc4d557d8a547b5aff901af35bda3a4ee30c819b82/starlette-1.0.0-py3-none-any.whl", hash = "sha256:d3ec55e0bb321692d275455ddfd3df75fff145d009685eb40dc91fc66b03d38b", size = 72651, upload-time = "2026-03-22T18:29:45.111Z" },
-]
-
-[[package]]
-name = "test-farm"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "pyyaml" },
-    { name = "typer" },
-    { name = "uvicorn" },
-    { name = "zeroconf" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "black" },
-    { name = "isort" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.0,<1.0.0" },
-    { name = "httpx", specifier = ">=0.28.0,<1.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },
-    { name = "typer", specifier = ">=0.12.3,<1.0" },
-    { name = "uvicorn", specifier = ">=0.32.0,<1.0.0" },
-    { name = "zeroconf", specifier = ">=0.149.17" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "black", specifier = ">=24.10.0,<26.0.0" },
-    { name = "isort", specifier = ">=5.13.2,<6.0.0" },
-    { name = "mypy", specifier = ">=1.20.0,<2.0.0" },
-    { name = "pre-commit", specifier = ">=4.2.0,<5.0.0" },
-    { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
 ]
 
 [[package]]

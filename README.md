@@ -17,6 +17,24 @@ For example:
 uv run disruptor scenarios/warehouse-loss.yaml --interface wlan0
 ```
 
+## Packaging
+
+The installable distribution is `slamcore-disruptor`. It packages the
+`disruptor` Python package and exposes the `disruptor` console script. It does
+not package the broader test-farm harness.
+
+Build a wheel from the repo root:
+
+```bash
+uv build --wheel
+```
+
+Install the resulting wheel into the target environment, then run:
+
+```bash
+disruptor <scenario.yaml> --interface <nic>
+```
+
 When run without `--dry-run`, Disruptor:
 
 1. Discovers Slamcore Aware devices with mDNS.

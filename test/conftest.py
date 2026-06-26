@@ -6,8 +6,8 @@ from collections.abc import Callable, Generator
 import pytest
 from pytest import Config, Item, MonkeyPatch, fixture
 
-from test_farm.disruptor.device_tree import HandleManager
-from test_farm.models import DiscoveredDevice
+from disruptor.device_tree import HandleManager
+from disruptor.models import DiscoveredDevice
 
 DEFAULT_TEST_DEVICE_VARIANT = "mk3a"
 DiscoveredDevicesFactory = Callable[[int], list[DiscoveredDevice]]

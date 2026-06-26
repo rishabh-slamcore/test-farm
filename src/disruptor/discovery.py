@@ -5,7 +5,7 @@ import time
 
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
 
-from test_farm.models import DEVICE_VARIANTS, DiscoveredDevice
+from disruptor.models import DEVICE_VARIANTS, DiscoveredDevice
 
 logger = logging.getLogger(__name__)
 

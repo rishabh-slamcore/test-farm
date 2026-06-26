@@ -114,14 +114,3 @@ DEFAULT_BUNDLE = Bundle.from_bytes(
     bundle_id="baseline",
     bundle_bytes=DEFAULT_BUNDLE_BYTES,
 )
-
-DEVICE_VARIANTS: tuple[str, ...] = ("mk2", "mk3a", "mk3b", "mk3c")
-
-
-@dataclass(frozen=True)
-class DiscoveredDevice:
-    """A real Slamcore Aware device discovered by the Disruptor."""
-
-    device_id: str
-    ip_address: str
-    variant: str

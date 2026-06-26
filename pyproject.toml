@@ -3,31 +3,40 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "test-farm"
+name = "slamcore-disruptor"
 version = "0.1.0"
-description = "Controlled harness for replaying Slamcore Aware update broadcast scenarios."
+description = "Network impairment utility for Slamcore Aware update broadcast scenarios."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.115.0,<1.0.0",
-  "httpx>=0.28.0,<1.0.0",
   "PyYAML>=6.0.3,<7.0.0",
   "typer>=0.12.3,<1.0",
-  "uvicorn>=0.32.0,<1.0.0",
   "zeroconf>=0.149.17",
 ]
 
 [project.scripts]
-test-farm = "test_farm.cli:main"
-disruptor = "test_farm.disruptor.cli:main"
+disruptor = "disruptor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/disruptor"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/README.md",
+  "/pyproject.toml",
+  "/src/disruptor",
+]
 
 [dependency-groups]
 dev = [
   "black>=24.10.0,<26.0.0",
+  "fastapi>=0.115.0,<1.0.0",
+  "httpx>=0.28.0,<1.0.0",
   "isort>=5.13.2,<6.0.0",
   "mypy>=1.20.0,<2.0.0",
   "pre-commit>=4.2.0,<5.0.0",
   "pytest>=8.4.2,<9.0.0",
+  "uvicorn>=0.32.0,<1.0.0",
 ]
 
 [tool.black]
@@ -43,12 +52,13 @@ src_paths = ["src", "test"]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["test_farm"]
+packages = ["disruptor", "test_farm"]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
 addopts = "--disable-plugin-autoload"
 cache_dir = "/tmp/pytest-cache"
+pythonpath = ["src"]
 markers = [
   "host_only: integration tests that require real host socket binding or Docker runtime access",
 ]

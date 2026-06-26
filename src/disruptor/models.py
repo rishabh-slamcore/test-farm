@@ -1,12 +1,31 @@
+"""Disruptor domain and tc planning models."""
+
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from test_farm.disruptor.device_tree import HTBTree
+    from disruptor.device_tree import HTBTree
+    from disruptor.scenario import DisruptorScenario, Selector
 
-from test_farm.models import DiscoveredDevice
-from test_farm.network_impairment import NetworkImpairment
-from test_farm.scenario import DisruptorScenario, Selector
+DEVICE_VARIANTS: tuple[str, ...] = ("mk2", "mk3a", "mk3b", "mk3c")
+
+
+@dataclass(frozen=True)
+class DiscoveredDevice:
+    """A real Slamcore Aware device discovered by the Disruptor."""
+
+    device_id: str
+    ip_address: str
+    variant: str
+
+
+@dataclass(frozen=True)
+class NetworkImpairment:
+    """The supported static Disruptor impairment subset."""
+
+    delay: float | None = None
+    loss: float | None = None
+    bandwidth_limit: int | None = None
 
 
 class TCSetupError(Exception):
@@ -34,7 +53,7 @@ class TCPlan:
 
     interface_name: str
     routing_tree: "HTBTree"
-    scenario: DisruptorScenario
+    scenario: "DisruptorScenario"
     warnings: tuple["ResolverWarning", ...] = ()
 
 
@@ -43,4 +62,4 @@ class ResolverWarning:
     """A structured policy-resolution warning."""
 
     policy_name: str
-    selector: Selector
+    selector: "Selector"

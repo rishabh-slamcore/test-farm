@@ -1,16 +1,14 @@
 import logging
 from typing import ClassVar, Iterator, Protocol, Sequence, Tuple
 
-from test_farm.disruptor.models import TCSetupError
-from test_farm.models import DiscoveredDevice
-from test_farm.network_impairment import (
-    NetworkImpairment,
+from disruptor.impairment import (
     _format_bandwidth_limit,
     compute_burst,
     netem_arguments,
     read_mtu,
     validate_burst,
 )
+from disruptor.models import DiscoveredDevice, NetworkImpairment, TCSetupError
 
 logger = logging.getLogger(__name__)
 

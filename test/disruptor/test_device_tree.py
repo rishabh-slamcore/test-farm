@@ -5,7 +5,7 @@ from collections.abc import Callable
 import pytest
 from pytest import MonkeyPatch
 
-from test_farm.disruptor.device_tree import (
+from disruptor.device_tree import (
     HandleManager,
     HTBClass,
     HTBTree,
@@ -14,9 +14,7 @@ from test_farm.disruptor.device_tree import (
     TBFNetemDuoQdisc,
     allocate_qdisc,
 )
-from test_farm.disruptor.models import TCSetupError
-from test_farm.models import DiscoveredDevice
-from test_farm.network_impairment import NetworkImpairment
+from disruptor.models import DiscoveredDevice, NetworkImpairment, TCSetupError
 
 
 def test_htb_tree_exposes_pending_commands_without_clearing_them() -> None:
@@ -70,7 +68,7 @@ def test_bandwidth_and_netem_impairment_renders_tbf_then_child_netem(
     monkeypatch: MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     devices = discovered_devices(2)
     impairment = NetworkImpairment(delay=0.1, loss=5.0, bandwidth_limit=1_000_000)
     qdisc = allocate_qdisc(impairment)
@@ -90,7 +88,7 @@ def test_htb_tree_adds_per_device_class_qdisc_and_filter(
     monkeypatch: MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     devices = discovered_devices(20)
     tree = HTBTree("wlan0")
 
@@ -154,7 +152,7 @@ def test_htb_tree_rejects_adding_default_impairment_twice() -> None:
 def test_htb_tree_default_impairment_renders_bandwidth_then_child_netem(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     HandleManager.clear()
     tree = HTBTree("wlan0")
 
@@ -174,7 +172,7 @@ def test_htb_tree_rejects_adding_the_same_device_twice(
     monkeypatch: MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     device = discovered_devices(1)[0]
     tree = HTBTree("wlan0")
     tree.add_node(
@@ -236,7 +234,7 @@ def test_leaf_qdisc_command_raises_for_device_without_handle(
     monkeypatch: MonkeyPatch,
     impairment: NetworkImpairment | None,
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     HandleManager.clear()
     qdisc = allocate_qdisc(impairment)
     node = HTBClass(interface="wlan0", qdisc=qdisc)

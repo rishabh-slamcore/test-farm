@@ -12,26 +12,24 @@ from unittest.mock import Mock
 import pytest
 from zeroconf import ServiceInfo
 
-from test_farm.disruptor import planning
-from test_farm.disruptor.discovery import (
+from disruptor import planning
+from disruptor.discovery import (
     _HAWKBITC_SERVICE_TYPE,
     AwareDeviceListener,
     discovered_device_from_service,
 )
-from test_farm.disruptor.models import TCExecutionError, TCSetupError
-from test_farm.disruptor.planning import (
+from disruptor.models import DiscoveredDevice, TCExecutionError, TCSetupError
+from disruptor.planning import (
     SubprocessExecutor,
     apply_disruptor_tc_plan,
     build_disruptor_tc_plan,
     render_disruptor_dry_run,
     resolve_policy_name,
 )
-from test_farm.models import DiscoveredDevice
-from test_farm.scenario import (
+from disruptor.scenario import (
     DeviceNameMatch,
     DisruptorScenarioFileError,
     RegexMatch,
-    ScenarioFileError,
     VariantMatch,
     load_disruptor_scenario_file,
 )
@@ -60,8 +58,8 @@ def _hawkbitc_service_info(
     )
 
 
-def test_disruptor_scenario_file_error_is_a_scenario_file_error() -> None:
-    assert issubclass(DisruptorScenarioFileError, ScenarioFileError)
+def test_disruptor_scenario_file_error_is_a_value_error() -> None:
+    assert issubclass(DisruptorScenarioFileError, ValueError)
 
 
 def test_load_disruptor_scenario_file_parses_default_impairment(tmp_path: Path) -> None:
@@ -668,7 +666,7 @@ def test_disruptor_tc_plan_renders_bandwidth_only_policy_through_tbf(
     monkeypatch: pytest.MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     scenario_file = tmp_path / "disruptor.yaml"
     scenario_file.write_text(
         ("network_impairment:\n" "  default:\n" "    bandwidth_limit: 1mbit\n"),
@@ -695,7 +693,7 @@ def test_disruptor_tc_plan_renders_bandwidth_with_delay_and_loss_through_tbf_the
     monkeypatch: pytest.MonkeyPatch,
     discovered_devices: Callable[[int], list[DiscoveredDevice]],
 ) -> None:
-    monkeypatch.setattr("test_farm.disruptor.device_tree.read_mtu", lambda interface: 1500)
+    monkeypatch.setattr("disruptor.device_tree.read_mtu", lambda interface: 1500)
     scenario_file = tmp_path / "disruptor.yaml"
     scenario_file.write_text(
         (
@@ -980,7 +978,7 @@ def test_subprocess_disruptor_tc_executor_explains_missing_net_admin(
             stderr="RTNETLINK answers: Operation not permitted\n",
         )
 
-    monkeypatch.setattr("test_farm.disruptor.planning.subprocess.run", deny_tc_command)
+    monkeypatch.setattr("disruptor.planning.subprocess.run", deny_tc_command)
     executor = SubprocessExecutor()
 
     with pytest.raises(
@@ -1008,7 +1006,7 @@ def test_subprocess_disruptor_tc_executor_ignores_absent_zero_handle_root_qdisc(
             stderr="Error: Cannot delete qdisc with handle of zero.\n",
         )
 
-    monkeypatch.setattr("test_farm.disruptor.planning.subprocess.run", deny_tc_command)
+    monkeypatch.setattr("disruptor.planning.subprocess.run", deny_tc_command)
     executor = SubprocessExecutor()
 
     executor.delete_root_qdisc("wlan0")
