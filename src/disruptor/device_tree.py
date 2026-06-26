@@ -1,5 +1,5 @@
 import logging
-from typing import ClassVar, Iterator, Protocol, Sequence, Tuple
+from typing import ClassVar, Iterator, Protocol, Sequence, Tuple, cast
 
 from disruptor.impairment import (
     _format_bandwidth_limit,
@@ -105,11 +105,14 @@ class TBFNetemDuoQdisc:
 
     def command(self, interface_name: str, parent: str, handle: str) -> Tuple[str, ...]:
         tbf_cmnds = self._tbf.command(interface_name, parent, handle)
-        netem_handle = handle + "1"
+        implicit_parent_class = handle + "1"
+        handle_cast = int(handle[:-1])
+        # By convention for handles the specification has to be "<unique_int>:"
+        netem_handle = handle_cast + 1001  # arbritary handle convention
         netem_cmnds = self._netem.command(
             interface_name=interface_name,
-            parent=handle,
-            handle=netem_handle,
+            parent=implicit_parent_class,
+            handle=f"{netem_handle}:",
         )
 
         return tbf_cmnds + netem_cmnds

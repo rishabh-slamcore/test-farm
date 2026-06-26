@@ -79,8 +79,8 @@ def test_bandwidth_and_netem_impairment_renders_tbf_then_child_netem(
         assert qdisc.command("wlan0", f"1:{class_minor}", f"{class_minor}:") == (
             f"tc qdisc add dev wlan0 parent 1:{class_minor} handle {class_minor}: "
             "tbf rate 1mbit burst 6000 latency 50ms",
-            f"tc qdisc add dev wlan0 parent {class_minor}: "
-            f"handle {class_minor}:1 netem delay 100ms loss 5%",
+            f"tc qdisc add dev wlan0 parent {class_minor}:1 "
+            f"handle {class_minor+1001}: netem delay 100ms loss 5%",
         )
 
 
@@ -164,7 +164,7 @@ def test_htb_tree_default_impairment_renders_bandwidth_then_child_netem(
         "tc class add dev wlan0 parent 1:1 classid 1:10 htb rate 1000mbit",
         "tc qdisc add dev wlan0 parent 1:10 handle 10: "
         "tbf rate 1mbit burst 6000 latency 50ms",
-        "tc qdisc add dev wlan0 parent 10: handle 10:1 netem delay 100ms loss 5%",
+        "tc qdisc add dev wlan0 parent 10:1 handle 1011: netem delay 100ms loss 5%",
     )
 
 

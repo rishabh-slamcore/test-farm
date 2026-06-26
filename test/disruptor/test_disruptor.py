@@ -718,7 +718,7 @@ def test_disruptor_tc_plan_renders_bandwidth_with_delay_and_loss_through_tbf_the
         "tc class add dev wlan0 parent 1:1 classid 1:10 htb rate 1000mbit",
         "tc qdisc add dev wlan0 parent 1:10 handle 10: "
         "tbf rate 1mbit burst 6000 latency 50ms",
-        "tc qdisc add dev wlan0 parent 10: handle 10:1 netem delay 100ms loss 5%",
+        "tc qdisc add dev wlan0 parent 10:1 handle 1011: netem delay 100ms loss 5%",
         "tc filter add dev wlan0 parent 1: protocol ip prio 1 u32 match ip dst "
         "192.0.2.10/32 flowid 1:10",
     )

@@ -61,7 +61,7 @@ def run(
         return
 
     try:
-        logger.info("Disruptor starting network impairment.")
+        logger.info("Disruptor starting network impairment. Press Ctrl-c to interupt. ")
         apply_disruptor_tc_plan(plan)
     except KeyboardInterrupt:
         logger.info("Interrupted; Disruptor tc state cleaned up.")
