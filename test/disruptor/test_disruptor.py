@@ -10,14 +10,14 @@ from threading import Event
 from unittest.mock import Mock
 
 import pytest
+from pytest import MonkeyPatch
+from typer.testing import CliRunner
 from zeroconf import ServiceInfo
 
 from disruptor import planning
-from disruptor.discovery import (
-    _HAWKBITC_SERVICE_TYPE,
-    AwareDeviceListener,
-    discovered_device_from_service,
-)
+from disruptor.discovery import _HAWKBITC_SERVICE_TYPE, AwareDeviceListener
+from disruptor.discovery import app as discovery_app
+from disruptor.discovery import discovered_device_from_service
 from disruptor.models import DiscoveredDevice, TCExecutionError, TCSetupError
 from disruptor.planning import (
     SubprocessExecutor,

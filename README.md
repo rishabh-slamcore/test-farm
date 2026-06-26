@@ -20,8 +20,12 @@ uv run disruptor scenarios/warehouse-loss.yaml --interface wlan0
 ## Packaging
 
 The installable distribution is `slamcore-disruptor`. It packages the
-`disruptor` Python package and exposes the `disruptor` console script. It does
-not package the broader test-farm harness.
+`disruptor` Python package and exposes these console scripts:
+
+- `disruptor`: apply or dry-run network impairment from a scenario file.
+- `device-discovery`: list Slamcore Aware devices discovered over mDNS.
+
+It does not package the broader test-farm harness.
 
 Build a wheel from the repo root:
 
@@ -168,6 +172,21 @@ The device id is the first component of the service name, before the first dot.
 The device IP is the first advertised service address.
 
 Scenario selectors use the discovered `device_id`, IP, and `variant`.
+
+Run standalone discovery from a repository checkout with:
+
+```bash
+uv run device-discovery
+```
+
+After installing the `slamcore-disruptor` wheel, run:
+
+```bash
+device-discovery
+```
+
+The command browses the same `_hawkbitc._tcp.local.` services used by Disruptor
+and logs each accepted device name, address, and variant.
 
 ## How Scenarios Become `tc`
 

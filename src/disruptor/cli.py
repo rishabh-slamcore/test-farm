@@ -56,8 +56,8 @@ def run(
         devices=discover_aware_devices(),
         scenario=scenario,
     )
+    typer.echo(render_disruptor_dry_run(plan), nl=False)
     if dry_run:
-        typer.echo(render_disruptor_dry_run(plan), nl=False)
         return
 
     try:

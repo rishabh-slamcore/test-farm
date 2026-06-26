@@ -3,11 +3,13 @@ import socket
 import sys
 import time
 
+import typer
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
 
 from disruptor.models import DEVICE_VARIANTS, DiscoveredDevice
 
 logger = logging.getLogger(__name__)
+app = typer.Typer(help="Discover Slamcore Aware devices over mDNS.")
 
 _HAWKBITC_SERVICE_TYPE = "_hawkbitc._tcp.local."
 _AWARE_DISCOVERY_WINDOW_SECONDS = 12.0
@@ -18,7 +20,7 @@ def discover_aware_devices() -> tuple[DiscoveredDevice, ...]:
 
     :returns: Discovered devices found during one bounded mDNS browse.
     """
-
+    logger.info(f"Waiting for {_AWARE_DISCOVERY_WINDOW_SECONDS}s to discover devices.")
     listener = AwareDeviceListener()
     zeroconf = Zeroconf()
     browser = ServiceBrowser(zeroconf, _HAWKBITC_SERVICE_TYPE, listener)
@@ -112,7 +114,7 @@ def _decode_addresses(addresses: list[bytes]) -> list[str]:
 
 
 def configure_logging(verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.WARNING
+    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
         stream=sys.stderr,
@@ -122,13 +124,27 @@ def configure_logging(verbose: bool = False) -> None:
     )
 
 
-def main() -> None:
-    configure_logging(verbose=True)
+@app.command()
+def discover(
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose discovery logging.",
+    ),
+) -> None:
+    """Discover Slamcore Aware devices visible to this host."""
+    configure_logging(verbose=verbose)
     devices = discover_aware_devices()
     for device in devices:
         logger.info(
             f"[name = {device.device_id} | address = {device.ip_address} | variant = {device.variant}]"
         )
+
+
+def main() -> None:
+    """Run the device discovery CLI."""
+    app()
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 disruptor = "disruptor.cli:main"
+device-discovery = "disruptor.discovery:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/disruptor"]
